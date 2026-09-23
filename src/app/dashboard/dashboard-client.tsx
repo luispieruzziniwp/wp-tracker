@@ -25,9 +25,11 @@ import { CHART_AXIS, CHART_COLORS, CHART_GRID } from "@/lib/chart-colors";
 import {
   RANGE_OPTIONS,
   RangeOption,
+  WeeklyEvent,
   formatCurrency,
   formatRate,
   formatWeekLabel,
+  mergeWeeklyData,
   rangeStartDate,
   safeRate,
   sum,
@@ -46,7 +48,8 @@ export default function DashboardClient() {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
   const [range, setRange] = useState<RangeOption>("month");
-  const [rows, setRows] = useState<WeeklyStatsRow[]>([]);
+  const [weeklyStatsRows, setWeeklyStatsRows] = useState<WeeklyStatsRow[]>([]);
+  const [eventRows, setEventRows] = useState<WeeklyEvent[]>([]);
   const [fetching, setFetching] = useState(false);
 
   const loadRole = useCallback(async () => {
@@ -78,25 +81,41 @@ export default function DashboardClient() {
   const loadStats = useCallback(async () => {
     setFetching(true);
 
-    let query = supabase
+    const start = rangeStartDate(range);
+
+    let weeklyStatsQuery = supabase
       .from("weekly_stats")
       .select("*")
       .order("week_start", { ascending: true });
-
-    const start = rangeStartDate(range);
     if (start) {
-      query = query.gte("week_start", start);
+      weeklyStatsQuery = weeklyStatsQuery.gte("week_start", start);
     }
 
-    const { data, error } = await query;
+    let eventsQuery = supabase
+      .from("events")
+      .select("type, occurred_at")
+      .order("occurred_at", { ascending: true });
+    if (start) {
+      eventsQuery = eventsQuery.gte("occurred_at", start);
+    }
+
+    const [weeklyStatsResult, eventsResult] = await Promise.all([
+      weeklyStatsQuery,
+      eventsQuery,
+    ]);
     setFetching(false);
 
-    if (error) {
-      toast.error(error.message);
+    if (weeklyStatsResult.error) {
+      toast.error(weeklyStatsResult.error.message);
+      return;
+    }
+    if (eventsResult.error) {
+      toast.error(eventsResult.error.message);
       return;
     }
 
-    setRows(data ?? []);
+    setWeeklyStatsRows(weeklyStatsResult.data ?? []);
+    setEventRows(eventsResult.data ?? []);
   }, [range, supabase]);
 
   useEffect(() => {
@@ -110,15 +129,21 @@ export default function DashboardClient() {
     router.replace("/login");
   }
 
+  const combined = useMemo(
+    () => mergeWeeklyData(weeklyStatsRows, eventRows, rangeStartDate(range)),
+    [weeklyStatsRows, eventRows, range],
+  );
+  const weeks = combined.weeks;
+
   const totals = useMemo(() => {
-    const connectionRequestsSent = sum(rows.map((r) => r.connection_requests_sent));
-    const connectionsAccepted = sum(rows.map((r) => r.connections_accepted));
-    const leadsReplied = sum(rows.map((r) => r.leads_replied));
-    const introCallsDone = sum(rows.map((r) => r.intro_calls_done));
-    const podcastsDone = sum(rows.map((r) => r.podcast_interviews_done));
-    const salesCallsDone = sum(rows.map((r) => r.sales_calls_done));
-    const enrollments = sum(rows.map((r) => r.enrollments));
-    const salesAmount = sum(rows.map((r) => r.sales_amount));
+    const connectionRequestsSent = sum(weeks.map((w) => w.connection_requests_sent));
+    const connectionsAccepted = sum(weeks.map((w) => w.connections_accepted));
+    const leadsReplied = sum(weeks.map((w) => w.leads_replied));
+    const introCallsDone = sum(weeks.map((w) => w.intro_calls_done));
+    const podcastsDone = sum(weeks.map((w) => w.podcast_interviews_done));
+    const salesCallsDone = sum(weeks.map((w) => w.sales_calls_done));
+    const enrollments = sum(weeks.map((w) => w.enrollments));
+    const salesAmount = sum(weeks.map((w) => w.sales_amount));
 
     return {
       connectionRequestsSent,
@@ -133,24 +158,40 @@ export default function DashboardClient() {
       replyRate: safeRate(leadsReplied, connectionsAccepted),
       enrollmentRate: safeRate(enrollments, salesCallsDone),
     };
-  }, [rows]);
+  }, [weeks]);
 
   const chartData = useMemo(
     () =>
-      rows.map((r) => ({
-        week: formatWeekLabel(r.week_start),
-        connection_requests_sent: r.connection_requests_sent,
-        connections_accepted: r.connections_accepted,
-        leads_replied: r.leads_replied,
-        sales_calls_scheduled: r.sales_calls_scheduled,
-        sales_calls_done: r.sales_calls_done,
-        podcast_calls_scheduled: r.podcast_calls_scheduled,
-        podcast_interviews_done: r.podcast_interviews_done,
-        enrollments: r.enrollments,
-        sales_amount: r.sales_amount,
+      weeks.map((w) => ({
+        week: formatWeekLabel(w.week_start),
+        connection_requests_sent: w.connection_requests_sent,
+        connections_accepted: w.connections_accepted,
+        leads_replied: w.leads_replied,
+        sales_calls_scheduled: w.sales_calls_scheduled,
+        sales_calls_done: w.sales_calls_done,
+        podcast_calls_scheduled: w.podcast_calls_scheduled,
+        podcast_interviews_done: w.podcast_interviews_done,
+        enrollments: w.enrollments,
+        sales_amount: w.sales_amount,
       })),
-    [rows],
+    [weeks],
   );
+
+  const setterFunnel = useMemo(() => {
+    const totals = { dial: 0, dial_answered: 0, appointment_booked: 0, appointment_converted: 0 };
+    for (const counts of Object.values(combined.extraSeries)) {
+      totals.dial += counts.dial ?? 0;
+      totals.dial_answered += counts.dial_answered ?? 0;
+      totals.appointment_booked += counts.appointment_booked ?? 0;
+      totals.appointment_converted += counts.appointment_converted ?? 0;
+    }
+    return [
+      { stage: "Dial", value: totals.dial },
+      { stage: "Answered", value: totals.dial_answered },
+      { stage: "Booked", value: totals.appointment_booked },
+      { stage: "Converted", value: totals.appointment_converted },
+    ];
+  }, [combined.extraSeries]);
 
   if (loading) {
     return (
@@ -199,7 +240,7 @@ export default function DashboardClient() {
         ))}
       </div>
 
-      {rows.length === 0 ? (
+      {weeks.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {fetching ? "Loading stats..." : "No weekly stats in this range."}
         </p>
@@ -300,6 +341,20 @@ export default function DashboardClient() {
                   <Bar yAxisId="left" dataKey="enrollments" name="Enrollments" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
                   <Line yAxisId="right" type="monotone" dataKey="sales_amount" name="Sales Amount" stroke={CHART_COLORS.orange} strokeWidth={2} dot={false} />
                 </ComposedChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </section>
+
+          <section className="grid grid-cols-1 gap-4">
+            <ChartCard title="Setter Funnel">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={setterFunnel} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                  <XAxis dataKey="stage" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="value" name="Count" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             </ChartCard>
           </section>
