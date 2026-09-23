@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { NavLinks } from "@/components/nav-links";
 import { createClient } from "@/lib/supabase/client";
 import type { EventType, UserRole } from "@/lib/supabase/database.types";
 import {
@@ -199,16 +200,19 @@ export default function TallyClient() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-6 px-4 py-8">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">Tally</h1>
-          {displayName && (
-            <p className="text-sm text-muted-foreground">{displayName}</p>
-          )}
+      <header className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-semibold">Tally</h1>
+            {displayName && (
+              <p className="text-sm text-muted-foreground">{displayName}</p>
+            )}
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleSignOut}>
+            Sign out
+          </Button>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleSignOut}>
-          Sign out
-        </Button>
+        <NavLinks role={role} />
       </header>
 
       {isSetter ? (

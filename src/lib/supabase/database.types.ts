@@ -70,6 +70,63 @@ export interface Database {
         };
         Relationships: [];
       };
+      weekly_stats: {
+        Row: {
+          id: string;
+          week_start: string;
+          week_end: string;
+          connection_requests_sent: number;
+          connections_accepted: number;
+          leads_replied: number;
+          intro_calls_scheduled: number;
+          intro_calls_done: number;
+          podcast_calls_scheduled: number;
+          podcast_interviews_done: number;
+          sales_calls_scheduled: number;
+          sales_calls_done: number;
+          enrollments: number;
+          sales_amount: number;
+          closed_through_podcast: number;
+          used_pc_pitch_to_close: number;
+        };
+        Insert: {
+          id?: string;
+          week_start: string;
+          week_end: string;
+          connection_requests_sent?: number;
+          connections_accepted?: number;
+          leads_replied?: number;
+          intro_calls_scheduled?: number;
+          intro_calls_done?: number;
+          podcast_calls_scheduled?: number;
+          podcast_interviews_done?: number;
+          sales_calls_scheduled?: number;
+          sales_calls_done?: number;
+          enrollments?: number;
+          sales_amount?: number;
+          closed_through_podcast?: number;
+          used_pc_pitch_to_close?: number;
+        };
+        Update: {
+          id?: string;
+          week_start?: string;
+          week_end?: string;
+          connection_requests_sent?: number;
+          connections_accepted?: number;
+          leads_replied?: number;
+          intro_calls_scheduled?: number;
+          intro_calls_done?: number;
+          podcast_calls_scheduled?: number;
+          podcast_interviews_done?: number;
+          sales_calls_scheduled?: number;
+          sales_calls_done?: number;
+          enrollments?: number;
+          sales_amount?: number;
+          closed_through_podcast?: number;
+          used_pc_pitch_to_close?: number;
+        };
+        Relationships: [];
+      };
       dripify_daily: {
         Row: {
           id: string;
@@ -110,3 +167,5 @@ export interface Database {
     CompositeTypes: Record<string, never>;
   };
 }
+
+export type WeeklyStatsRow = Database["public"]["Tables"]["weekly_stats"]["Row"];
