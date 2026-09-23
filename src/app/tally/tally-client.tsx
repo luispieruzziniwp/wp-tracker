@@ -5,18 +5,33 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import type { TallyEventType, UserRole } from "@/lib/supabase/database.types";
-import { TALLY_EVENTS, labelForEventType, startOfTodayISO } from "@/lib/tally-events";
+import type { EventType, UserRole } from "@/lib/supabase/database.types";
+import {
+  SETTER_EVENTS,
+  TALLY_SECTIONS,
+  labelForEventType,
+  startOfTodayISO,
+} from "@/lib/tally-events";
 
-type Counts = Record<TallyEventType, number>;
+type Counts = Record<EventType, number>;
 
 const EMPTY_COUNTS: Counts = {
-  sales_call: 0,
-  intro_call: 0,
+  sales_call_scheduled: 0,
+  sales_call_done: 0,
+  sales_call_canceled: 0,
+  intro_call_scheduled: 0,
+  intro_call_done: 0,
+  intro_call_canceled: 0,
   podcast_scheduled: 0,
-  podcast_rescheduled: 0,
+  podcast_done: 0,
   podcast_canceled: 0,
-  podcast_recorded: 0,
+  podcast_rescheduled: 0,
+  verbal_agreement: 0,
+  paid: 0,
+  dial: 0,
+  dial_answered: 0,
+  appointment_booked: 0,
+  appointment_converted: 0,
 };
 
 export default function TallyClient() {
@@ -27,7 +42,7 @@ export default function TallyClient() {
   const [role, setRole] = useState<UserRole | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [counts, setCounts] = useState<Counts>(EMPTY_COUNTS);
-  const [pendingType, setPendingType] = useState<TallyEventType | null>(null);
+  const [pendingType, setPendingType] = useState<EventType | null>(null);
   const [undoing, setUndoing] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -51,7 +66,7 @@ export default function TallyClient() {
     setRole(profile?.role ?? null);
     setDisplayName(profile?.display_name ?? null);
 
-    if (profile?.role === "owner" || profile?.role === "ops") {
+    if (profile?.role === "owner" || profile?.role === "ops" || profile?.role === "setter") {
       const { data: events } = await supabase
         .from("events")
         .select("type")
@@ -61,7 +76,7 @@ export default function TallyClient() {
       const next = { ...EMPTY_COUNTS };
       for (const row of events ?? []) {
         if (row.type in next) {
-          next[row.type as TallyEventType] += 1;
+          next[row.type as EventType] += 1;
         }
       }
       setCounts(next);
@@ -74,7 +89,7 @@ export default function TallyClient() {
     loadData();
   }, [loadData]);
 
-  async function handleTap(type: TallyEventType) {
+  async function handleTap(type: EventType) {
     setPendingType(type);
 
     const {
@@ -147,7 +162,7 @@ export default function TallyClient() {
     }
 
     if (last.type in EMPTY_COUNTS && last.occurred_at >= startOfTodayISO()) {
-      const type = last.type as TallyEventType;
+      const type = last.type as EventType;
       setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
     }
 
@@ -167,7 +182,7 @@ export default function TallyClient() {
     );
   }
 
-  if (role !== "owner" && role !== "ops") {
+  if (role !== "owner" && role !== "ops" && role !== "setter") {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 text-center">
         <p className="text-sm text-muted-foreground">
@@ -179,6 +194,8 @@ export default function TallyClient() {
       </main>
     );
   }
+
+  const isSetter = role === "setter";
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-6 px-4 py-8">
@@ -194,21 +211,48 @@ export default function TallyClient() {
         </Button>
       </header>
 
-      <div className="grid grid-cols-1 gap-3">
-        {TALLY_EVENTS.map(({ type, label }) => (
-          <Button
-            key={type}
-            onClick={() => handleTap(type)}
-            disabled={pendingType === type}
-            className="flex h-24 flex-col items-center justify-center gap-1 text-base"
-          >
-            <span>{label}</span>
-            <span className="text-2xl font-bold tabular-nums">
-              {counts[type]}
-            </span>
-          </Button>
-        ))}
-      </div>
+      {isSetter ? (
+        <div className="grid grid-cols-1 gap-3">
+          {SETTER_EVENTS.map(({ type, label }) => (
+            <Button
+              key={type}
+              onClick={() => handleTap(type)}
+              disabled={pendingType === type}
+              className="flex h-24 flex-col items-center justify-center gap-1 text-base"
+            >
+              <span>{label}</span>
+              <span className="text-2xl font-bold tabular-nums">
+                {counts[type]}
+              </span>
+            </Button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {TALLY_SECTIONS.map(({ section, events }) => (
+            <div key={section} className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                {section}
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                {events.map(({ type, label }) => (
+                  <Button
+                    key={type}
+                    onClick={() => handleTap(type)}
+                    disabled={pendingType === type}
+                    className="flex h-24 flex-col items-center justify-center gap-1 text-base"
+                  >
+                    <span>{label}</span>
+                    <span className="text-2xl font-bold tabular-nums">
+                      {counts[type]}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <Button
         variant="outline"

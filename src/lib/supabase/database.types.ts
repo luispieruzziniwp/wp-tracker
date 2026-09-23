@@ -1,12 +1,18 @@
 export type UserRole = "owner" | "ops" | "setter";
 
 export type TallyEventType =
-  | "sales_call"
-  | "intro_call"
+  | "sales_call_scheduled"
+  | "sales_call_done"
+  | "sales_call_canceled"
+  | "intro_call_scheduled"
+  | "intro_call_done"
+  | "intro_call_canceled"
   | "podcast_scheduled"
-  | "podcast_rescheduled"
+  | "podcast_done"
   | "podcast_canceled"
-  | "podcast_recorded";
+  | "podcast_rescheduled"
+  | "verbal_agreement"
+  | "paid";
 
 export type SetterEventType =
   | "dial"
