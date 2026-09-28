@@ -69,12 +69,9 @@ const TYPE_ICON: Record<EventType, typeof Calendar> = {
 };
 
 const TONE_CLASSES: Record<EventTone, string> = {
-  neutral:
-    "border-border bg-card hover:bg-accent/60 text-foreground",
-  positive:
-    "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50",
-  negative:
-    "border-rose-200 bg-rose-50/80 text-rose-700 hover:bg-rose-100 dark:border-rose-900/70 dark:bg-rose-950/20 dark:text-rose-300 dark:hover:bg-rose-950/40",
+  neutral: "border-border bg-card hover:bg-accent text-foreground",
+  positive: "border-positive/30 bg-positive/10 text-positive hover:bg-positive/15",
+  negative: "border-negative/30 bg-negative/10 text-negative hover:bg-negative/15",
 };
 
 export default function TallyClient() {
@@ -264,7 +261,7 @@ export default function TallyClient() {
     <AppShell role={role} onSignOut={handleSignOut}>
       <div className="flex flex-col gap-5">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Tally</h1>
+          <h1 className="font-serif text-2xl tracking-tight">Tally</h1>
           {displayName && (
             <p className="text-sm text-muted-foreground">Hey, {displayName}</p>
           )}

@@ -5,8 +5,8 @@
   "start_url": "/tally",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#fafafa",
-  "theme_color": "#2563eb",
+  "background_color": "#011F2B",
+  "theme_color": "#3FB8C9",
   "orientation": "portrait",
   "icons": [
     {

@@ -9,7 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "..", "public", "icons");
 mkdirSync(OUT_DIR, { recursive: true });
 
-const ACCENT = [37, 99, 235]; // matches --brand accent (blue-600-ish)
+const ACCENT = [63, 184, 201]; // #3FB8C9 — Wisdom Partners brand teal
+const MARK = [1, 31, 43]; // #011F2B — dark navy checkmark for on-brand contrast
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -81,15 +82,15 @@ function renderPNG(size) {
       let a = 255;
 
       if (d <= thickness / 2) {
-        r = 255;
-        g = 255;
-        b = 255;
+        r = MARK[0];
+        g = MARK[1];
+        b = MARK[2];
       } else if (d <= thickness / 2 + 1) {
         // 1px anti-alias blend
         const t = d - thickness / 2;
-        r = Math.round(255 * (1 - t) + ACCENT[0] * t);
-        g = Math.round(255 * (1 - t) + ACCENT[1] * t);
-        b = Math.round(255 * (1 - t) + ACCENT[2] * t);
+        r = Math.round(MARK[0] * (1 - t) + ACCENT[0] * t);
+        g = Math.round(MARK[1] * (1 - t) + ACCENT[1] * t);
+        b = Math.round(MARK[2] * (1 - t) + ACCENT[2] * t);
       }
 
       data[idx] = r;

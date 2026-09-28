@@ -1,12 +1,12 @@
-// Validated categorical palette (see dataviz skill: references/palette.md).
-// Slots are ordered for adjacent colorblind-safe contrast — pick in order.
+// Wisdom Partners brand chart palette, in brand order (see globals.css --chart-*).
+// Slots are ordered for adjacent contrast — pick in order.
 export const CHART_COLORS = {
-  blue: "#2a78d6",
-  orange: "#eb6834",
-  aqua: "#1baf7a",
-  yellow: "#eda100",
-  magenta: "#e87ba4",
+  teal: "#3FB8C9",
+  blue: "#1E8AB5", // lightened from raw brand blue #04678E for contrast on the card bg
+  mist: "#9CC7D4",
+  green: "#4FD1A5",
+  gold: "#F2C46D",
 } as const;
 
-export const CHART_GRID = "#e1e0d9";
-export const CHART_AXIS = "#898781";
+export const CHART_GRID = "#0B4F68";
+export const CHART_AXIS = "#9CC7D4";

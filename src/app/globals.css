@@ -13,80 +13,63 @@ body {
   }
 }
 
+/*
+ * Wisdom Partners brand theme — dark, single source of truth.
+ * Every color below is a space-separated R G B triplet (0-255) so Tailwind's
+ * opacity modifiers (e.g. bg-card/95, bg-positive/10) work correctly via the
+ * rgb(var(--x) / <alpha-value>) pattern in tailwind.config.ts.
+ */
 @layer base {
   :root {
-    /* Single source of truth for the app's accent color. Change this one value. */
-    --brand: oklch(0.546 0.215 262.1);
-    --brand-foreground: oklch(0.985 0 0);
+    --background: 1 31 43; /* #011F2B — page background */
+    --foreground: 242 250 252; /* #F2FAFC — primary text */
 
-    --background: oklch(0.985 0.002 247.9);
-    --foreground: oklch(0.21 0.01 264);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.21 0.01 264);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.21 0.01 264);
-    --primary: var(--brand);
-    --primary-foreground: var(--brand-foreground);
-    --secondary: oklch(0.96 0.003 264);
-    --secondary-foreground: oklch(0.21 0.01 264);
-    --muted: oklch(0.96 0.003 264);
-    --muted-foreground: oklch(0.51 0.014 264);
-    --accent: oklch(0.94 0.03 262);
-    --accent-foreground: oklch(0.32 0.08 262);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.9 0.005 264);
-    --input: oklch(0.9 0.005 264);
-    --ring: var(--brand);
-    --chart-1: oklch(0.871 0.006 286.286);
-    --chart-2: oklch(0.552 0.016 285.938);
-    --chart-3: oklch(0.442 0.017 285.786);
-    --chart-4: oklch(0.37 0.013 285.805);
-    --chart-5: oklch(0.274 0.006 286.033);
+    --card: 2 54 74; /* #02364A — brand navy, card/surface background */
+    --card-foreground: 242 250 252;
+    --popover: 2 54 74;
+    --popover-foreground: 242 250 252;
+
+    --primary: 63 184 201; /* #3FB8C9 — brand teal accent */
+    --primary-foreground: 1 31 43; /* dark navy text on teal for AA contrast */
+
+    --secondary: 4 103 142; /* #04678E — raised elements / hover fills */
+    --secondary-foreground: 242 250 252;
+
+    --muted: 4 103 142;
+    --muted-foreground: 156 199 212; /* #9CC7D4 — secondary/muted text */
+
+    --accent: 4 103 142;
+    --accent-foreground: 242 250 252;
+
+    --destructive: 240 122 122; /* #F07A7A */
+    --destructive-foreground: 1 31 43;
+
+    --border: 11 79 104; /* #0B4F68 */
+    --input: 11 79 104;
+    --ring: 63 184 201; /* teal — focus rings */
+
+    /* Status tints — solid color for text/icons, subtle low-alpha for fills. */
+    --positive: 79 209 165; /* #4FD1A5 — verbal_agreement, paid, positive deltas */
+    --negative: 240 122 122; /* #F07A7A — canceled, rescheduled, negative deltas */
+
+    /* Chart series, in brand order. Chart-2 is lightened from the raw brand
+       blue (#04678E) to #1E8AB5 so it has enough contrast on the card bg. */
+    --chart-1: 63 184 201; /* teal */
+    --chart-2: 30 138 181; /* lightened blue */
+    --chart-3: 156 199 212; /* mist */
+    --chart-4: 79 209 165; /* green */
+    --chart-5: 242 196 109; /* gold */
+
     --radius: 0.75rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.21 0.01 264);
-    --sidebar-primary: var(--brand);
-    --sidebar-primary-foreground: var(--brand-foreground);
-    --sidebar-accent: oklch(0.96 0.003 264);
-    --sidebar-accent-foreground: oklch(0.21 0.01 264);
-    --sidebar-border: oklch(0.9 0.005 264);
-    --sidebar-ring: var(--brand);
-  }
-  .dark {
-    --brand: oklch(0.65 0.19 262.1);
-    --brand-foreground: oklch(0.141 0.005 285.823);
 
-    --background: oklch(0.16 0.006 264);
-    --foreground: oklch(0.96 0.003 264);
-    --card: oklch(0.21 0.008 264);
-    --card-foreground: oklch(0.96 0.003 264);
-    --popover: oklch(0.21 0.008 264);
-    --popover-foreground: oklch(0.96 0.003 264);
-    --primary: var(--brand);
-    --primary-foreground: var(--brand-foreground);
-    --secondary: oklch(0.27 0.008 264);
-    --secondary-foreground: oklch(0.96 0.003 264);
-    --muted: oklch(0.27 0.008 264);
-    --muted-foreground: oklch(0.66 0.012 264);
-    --accent: oklch(0.3 0.05 262);
-    --accent-foreground: oklch(0.9 0.03 262);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: var(--brand);
-    --chart-1: oklch(0.871 0.006 286.286);
-    --chart-2: oklch(0.552 0.016 285.938);
-    --chart-3: oklch(0.442 0.017 285.786);
-    --chart-4: oklch(0.37 0.013 285.805);
-    --chart-5: oklch(0.274 0.006 286.033);
-    --sidebar: oklch(0.21 0.008 264);
-    --sidebar-foreground: oklch(0.96 0.003 264);
-    --sidebar-primary: var(--brand);
-    --sidebar-primary-foreground: var(--brand-foreground);
-    --sidebar-accent: oklch(0.27 0.008 264);
-    --sidebar-accent-foreground: oklch(0.96 0.003 264);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: var(--brand);
+    --sidebar: 2 54 74;
+    --sidebar-foreground: 242 250 252;
+    --sidebar-primary: 63 184 201;
+    --sidebar-primary-foreground: 1 31 43;
+    --sidebar-accent: 4 103 142;
+    --sidebar-accent-foreground: 242 250 252;
+    --sidebar-border: 11 79 104;
+    --sidebar-ring: 63 184 201;
   }
 }
 @layer base {
@@ -95,5 +78,13 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-serif), Georgia, serif;
   }
 }

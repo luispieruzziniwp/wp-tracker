@@ -37,7 +37,7 @@ export function AppShell({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Check className="h-4 w-4" strokeWidth={3} />
             </span>
-            <span className="text-sm font-semibold tracking-tight">
+            <span className="font-serif text-base tracking-tight">
               Wisdom Partners
             </span>
           </div>
@@ -51,7 +51,7 @@ export function AppShell({
                   className={cn(
                     "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                     active
-                      ? "bg-accent text-accent-foreground"
+                      ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   )}
                 >

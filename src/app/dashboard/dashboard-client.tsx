@@ -216,7 +216,7 @@ export default function DashboardClient() {
   return (
     <AppShell role={role} onSignOut={handleSignOut}>
       <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+      <h1 className="font-serif text-2xl tracking-tight">Dashboard</h1>
 
       <div className="flex flex-wrap gap-2">
         {RANGE_OPTIONS.map((option) => (
@@ -264,9 +264,9 @@ export default function DashboardClient() {
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="connection_requests_sent" name="Requests Sent" stroke={CHART_COLORS.blue} strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="connections_accepted" name="Accepted" stroke={CHART_COLORS.orange} strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="leads_replied" name="Replied" stroke={CHART_COLORS.aqua} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="connection_requests_sent" name="Requests Sent" stroke={CHART_COLORS.teal} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="connections_accepted" name="Accepted" stroke={CHART_COLORS.blue} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="leads_replied" name="Replied" stroke={CHART_COLORS.mist} strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -279,8 +279,8 @@ export default function DashboardClient() {
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="sales_calls_scheduled" name="Scheduled" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="sales_calls_done" name="Done" fill={CHART_COLORS.orange} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="sales_calls_scheduled" name="Scheduled" fill={CHART_COLORS.teal} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="sales_calls_done" name="Done" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -293,8 +293,8 @@ export default function DashboardClient() {
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="podcast_calls_scheduled" name="Scheduled" fill={CHART_COLORS.aqua} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="podcast_interviews_done" name="Done" fill={CHART_COLORS.yellow} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="podcast_calls_scheduled" name="Scheduled" fill={CHART_COLORS.mist} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="podcast_interviews_done" name="Done" fill={CHART_COLORS.gold} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -315,7 +315,7 @@ export default function DashboardClient() {
                   <YAxis
                     yAxisId="right"
                     orientation="right"
-                    tick={{ fontSize: 12, fill: CHART_COLORS.orange }}
+                    tick={{ fontSize: 12, fill: CHART_COLORS.blue }}
                     tickLine={false}
                     axisLine={false}
                     width={64}
@@ -330,8 +330,8 @@ export default function DashboardClient() {
                     }
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar yAxisId="left" dataKey="enrollments" name="Enrollments" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
-                  <Line yAxisId="right" type="monotone" dataKey="sales_amount" name="Sales Amount" stroke={CHART_COLORS.orange} strokeWidth={2} dot={false} />
+                  <Bar yAxisId="left" dataKey="enrollments" name="Enrollments" fill={CHART_COLORS.teal} radius={[4, 4, 0, 0]} />
+                  <Line yAxisId="right" type="monotone" dataKey="sales_amount" name="Sales Amount" stroke={CHART_COLORS.blue} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -345,7 +345,7 @@ export default function DashboardClient() {
                   <XAxis dataKey="stage" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  <Bar dataKey="value" name="Count" fill={CHART_COLORS.blue} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="value" name="Count" fill={CHART_COLORS.teal} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -383,7 +383,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-sm text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">{children}</CardContent>
     </Card>
