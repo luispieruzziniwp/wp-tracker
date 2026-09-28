@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
@@ -15,8 +15,26 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "WP Sales Tracker",
-  description: "Internal sales activity tracker",
+  title: "Wisdom Partners Tracker",
+  description: "Sales, setter, and outreach activity tracker for Wisdom Partners",
+  manifest: "/manifest.json",
+  icons: {
+    icon: [{ url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "WP Tracker",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

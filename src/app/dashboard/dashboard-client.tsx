@@ -18,7 +18,7 @@ import {
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { NavLinks } from "@/components/nav-links";
+import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
 import { CHART_AXIS, CHART_COLORS, CHART_GRID } from "@/lib/chart-colors";
@@ -203,28 +203,20 @@ export default function DashboardClient() {
 
   if (role !== "owner" && role !== "ops") {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 text-center">
-        <p className="text-sm text-muted-foreground">
-          This page isn&apos;t available for your role.
-        </p>
-        <Button variant="outline" onClick={handleSignOut}>
-          Sign out
-        </Button>
-      </main>
+      <AppShell role={role} onSignOut={handleSignOut}>
+        <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+          <p className="text-sm text-muted-foreground">
+            This page isn&apos;t available for your role.
+          </p>
+        </div>
+      </AppShell>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-6 px-4 py-8">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Dashboard</h1>
-          <Button variant="ghost" size="sm" onClick={handleSignOut}>
-            Sign out
-          </Button>
-        </div>
-        <NavLinks role={role} />
-      </header>
+    <AppShell role={role} onSignOut={handleSignOut}>
+      <div className="flex flex-col gap-6">
+      <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
 
       <div className="flex flex-wrap gap-2">
         {RANGE_OPTIONS.map((option) => (
@@ -360,7 +352,8 @@ export default function DashboardClient() {
           </section>
         </>
       )}
-    </main>
+      </div>
+    </AppShell>
   );
 }
 

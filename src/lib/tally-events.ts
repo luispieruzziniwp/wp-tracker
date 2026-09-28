@@ -4,52 +4,64 @@ import type {
   TallyEventType,
 } from "@/lib/supabase/database.types";
 
-export const TALLY_SECTIONS: {
-  section: string;
-  events: { type: TallyEventType; label: string }[];
-}[] = [
+export type EventTone = "neutral" | "positive" | "negative";
+
+export type TallyEventDef = {
+  type: TallyEventType;
+  label: string;
+  toast: string;
+  tone: EventTone;
+};
+
+export type SetterEventDef = {
+  type: SetterEventType;
+  label: string;
+  toast: string;
+  tone: EventTone;
+};
+
+export const TALLY_SECTIONS: { section: string; events: TallyEventDef[] }[] = [
   {
     section: "Sales Calls",
     events: [
-      { type: "sales_call_scheduled", label: "Scheduled" },
-      { type: "sales_call_done", label: "Done" },
-      { type: "sales_call_canceled", label: "Canceled" },
+      { type: "sales_call_scheduled", label: "Scheduled", toast: "Sales call scheduled ✓", tone: "neutral" },
+      { type: "sales_call_done", label: "Done", toast: "Sales call done ✓", tone: "neutral" },
+      { type: "sales_call_canceled", label: "Canceled", toast: "Sales call canceled", tone: "negative" },
     ],
   },
   {
     section: "Intro Calls",
     events: [
-      { type: "intro_call_scheduled", label: "Scheduled" },
-      { type: "intro_call_done", label: "Done" },
-      { type: "intro_call_canceled", label: "Canceled" },
+      { type: "intro_call_scheduled", label: "Scheduled", toast: "Intro call scheduled ✓", tone: "neutral" },
+      { type: "intro_call_done", label: "Done", toast: "Intro call done ✓", tone: "neutral" },
+      { type: "intro_call_canceled", label: "Canceled", toast: "Intro call canceled", tone: "negative" },
     ],
   },
   {
     section: "Podcast",
     events: [
-      { type: "podcast_scheduled", label: "Scheduled" },
-      { type: "podcast_done", label: "Done" },
-      { type: "podcast_canceled", label: "Canceled" },
-      { type: "podcast_rescheduled", label: "Rescheduled" },
+      { type: "podcast_scheduled", label: "Scheduled", toast: "Podcast scheduled ✓", tone: "neutral" },
+      { type: "podcast_done", label: "Done", toast: "Podcast done ✓", tone: "neutral" },
+      { type: "podcast_canceled", label: "Canceled", toast: "Podcast canceled", tone: "negative" },
+      { type: "podcast_rescheduled", label: "Rescheduled", toast: "Podcast rescheduled", tone: "negative" },
     ],
   },
   {
     section: "Outcomes",
     events: [
-      { type: "verbal_agreement", label: "Verbal Agreement" },
-      { type: "paid", label: "Paid" },
+      { type: "verbal_agreement", label: "Verbal Agreement", toast: "Verbal agreement ✓", tone: "positive" },
+      { type: "paid", label: "Paid", toast: "Paid ✓", tone: "positive" },
     ],
   },
 ];
 
-export const TALLY_EVENTS: { type: TallyEventType; label: string }[] =
-  TALLY_SECTIONS.flatMap((s) => s.events);
+export const TALLY_EVENTS: TallyEventDef[] = TALLY_SECTIONS.flatMap((s) => s.events);
 
-export const SETTER_EVENTS: { type: SetterEventType; label: string }[] = [
-  { type: "dial", label: "Dial" },
-  { type: "dial_answered", label: "Dial Answered" },
-  { type: "appointment_booked", label: "Appointment Booked" },
-  { type: "appointment_converted", label: "Appointment Converted" },
+export const SETTER_EVENTS: SetterEventDef[] = [
+  { type: "dial", label: "Dial", toast: "Dial logged ✓", tone: "neutral" },
+  { type: "dial_answered", label: "Dial Answered", toast: "Dial answered ✓", tone: "neutral" },
+  { type: "appointment_booked", label: "Appointment Booked", toast: "Appointment booked ✓", tone: "positive" },
+  { type: "appointment_converted", label: "Appointment Converted", toast: "Appointment converted ✓", tone: "positive" },
 ];
 
 const ALL_LABELS: Record<EventType, string> = {
@@ -77,6 +89,15 @@ export function labelForEventType(type: EventType): string {
 
 export function startOfTodayISO(): string {
   const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+export function startOfWeekISO(): string {
+  const d = new Date();
+  const day = d.getDay(); // 0 = Sunday
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diffToMonday);
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
 }
