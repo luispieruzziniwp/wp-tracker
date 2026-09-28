@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -17,16 +17,18 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
+import { OwnerOpsTallyView } from "./owner-ops-tally-view";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { EventType, UserRole } from "@/lib/supabase/database.types";
 import {
   SETTER_EVENTS,
-  TALLY_SECTIONS,
   type EventTone,
   startOfTodayISO,
   startOfWeekISO,
 } from "@/lib/tally-events";
+
+type TodayEvent = { id: string; type: EventType; occurred_at: string };
 
 type Counts = Record<EventType, number>;
 
@@ -86,6 +88,15 @@ export default function TallyClient() {
   const [pendingType, setPendingType] = useState<EventType | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [todayEvents, setTodayEvents] = useState<TodayEvent[]>([]);
+  const [pillMessage, setPillMessage] = useState<string | null>(null);
+  const pillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pillTimerRef.current) clearTimeout(pillTimerRef.current);
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -119,16 +130,19 @@ export default function TallyClient() {
       const todayStart = startOfTodayISO();
       const nextToday = { ...EMPTY_COUNTS };
       const nextWeek = { ...EMPTY_COUNTS };
+      const nextTodayEvents: TodayEvent[] = [];
       for (const row of events ?? []) {
         if (row.type in nextWeek) {
           nextWeek[row.type as EventType] += 1;
           if (row.occurred_at >= todayStart) {
             nextToday[row.type as EventType] += 1;
+            nextTodayEvents.push({ id: row.id, type: row.type as EventType, occurred_at: row.occurred_at });
           }
         }
       }
       setCounts(nextToday);
       setWeekCounts(nextWeek);
+      setTodayEvents(nextTodayEvents);
       setLastEventId(events && events.length > 0 ? events[0].id : null);
     }
 
@@ -138,6 +152,16 @@ export default function TallyClient() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  function showToast(message: string) {
+    if (role === "setter") {
+      toast.success(message);
+      return;
+    }
+    setPillMessage(message);
+    if (pillTimerRef.current) clearTimeout(pillTimerRef.current);
+    pillTimerRef.current = setTimeout(() => setPillMessage(null), 1400);
+  }
 
   async function handleTap(type: EventType, toastText: string) {
     setPendingType(type);
@@ -171,7 +195,13 @@ export default function TallyClient() {
     }
 
     setLastEventId(data?.id ?? null);
-    toast.success(toastText);
+    if (data?.id) {
+      setTodayEvents((list) => [
+        { id: data.id, type, occurred_at: new Date().toISOString() },
+        ...list,
+      ]);
+    }
+    showToast(toastText);
   }
 
   async function handleUndo() {
@@ -225,9 +255,10 @@ export default function TallyClient() {
         setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
       }
     }
+    setTodayEvents((list) => list.filter((e) => e.id !== last.id));
     setLastEventId(null);
 
-    toast.success("Undid last entry");
+    showToast("Undid last entry");
   }
 
   async function handleSignOut() {
@@ -255,21 +286,19 @@ export default function TallyClient() {
     );
   }
 
-  const isSetter = role === "setter";
+  if (role === "setter") {
+    return (
+      <AppShell role={role} onSignOut={handleSignOut}>
+        <div className="flex flex-col gap-5">
+          <div>
+            <h1 className="font-serif text-2xl tracking-tight">Tally</h1>
+            {displayName && (
+              <p className="text-sm text-muted-foreground">Hey, {displayName}</p>
+            )}
+          </div>
 
-  return (
-    <AppShell role={role} onSignOut={handleSignOut}>
-      <div className="flex flex-col gap-5">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight">Tally</h1>
-          {displayName && (
-            <p className="text-sm text-muted-foreground">Hey, {displayName}</p>
-          )}
-        </div>
+          <WeekSummary role={role} weekCounts={weekCounts} />
 
-        <WeekSummary role={role} weekCounts={weekCounts} />
-
-        {isSetter ? (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Setter Activity</CardTitle>
@@ -288,44 +317,37 @@ export default function TallyClient() {
               ))}
             </CardContent>
           </Card>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {TALLY_SECTIONS.map(({ section, events }) => (
-              <Card key={section}>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">{section}</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-2.5 pt-0">
-                  {events.map((event) => (
-                    <EventButton
-                      key={event.type}
-                      label={event.label}
-                      tone={event.tone}
-                      count={counts[event.type]}
-                      pending={pendingType === event.type}
-                      Icon={TYPE_ICON[event.type]}
-                      onClick={() => handleTap(event.type, event.toast)}
-                    />
-                  ))}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
 
-        <div className="sticky bottom-20 z-10 md:bottom-4">
-          <button
-            type="button"
-            onClick={handleUndo}
-            disabled={undoing || !lastEventId}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-background/95 text-sm font-medium text-muted-foreground shadow-md backdrop-blur transition-colors hover:bg-accent/60 active:scale-[0.98] disabled:opacity-50"
-          >
-            <Undo2 className="h-4 w-4" />
-            {undoing ? "Undoing..." : "Undo last"}
-          </button>
+          <div className="sticky bottom-20 z-10 md:bottom-4">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={undoing || !lastEventId}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-background/95 text-sm font-medium text-muted-foreground shadow-md backdrop-blur transition-colors hover:bg-accent/60 active:scale-[0.98] disabled:opacity-50"
+            >
+              <Undo2 className="h-4 w-4" />
+              {undoing ? "Undoing..." : "Undo last"}
+            </button>
+          </div>
         </div>
-      </div>
-    </AppShell>
+      </AppShell>
+    );
+  }
+
+  return (
+    <OwnerOpsTallyView
+      displayName={displayName}
+      counts={counts}
+      weekCounts={weekCounts}
+      todayEvents={todayEvents}
+      pendingType={pendingType}
+      undoing={undoing}
+      lastEventId={lastEventId}
+      pillMessage={pillMessage}
+      onTap={handleTap}
+      onUndo={handleUndo}
+      onSignOut={handleSignOut}
+    />
   );
 }
 
