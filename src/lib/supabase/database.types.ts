@@ -22,6 +22,13 @@ export type SetterEventType =
 
 export type EventType = TallyEventType | SetterEventType;
 
+export type EventSource =
+  | "podcast"
+  | "networking"
+  | "referral"
+  | "inbound"
+  | "outbound";
+
 export interface Database {
   public: {
     Tables: {
@@ -51,6 +58,7 @@ export interface Database {
           occurred_at: string;
           notes: string | null;
           outcome: string | null;
+          source: EventSource | null;
         };
         Insert: {
           id?: string;
@@ -59,6 +67,7 @@ export interface Database {
           occurred_at?: string;
           notes?: string | null;
           outcome?: string | null;
+          source?: EventSource | null;
         };
         Update: {
           id?: string;
@@ -67,6 +76,7 @@ export interface Database {
           occurred_at?: string;
           notes?: string | null;
           outcome?: string | null;
+          source?: EventSource | null;
         };
         Relationships: [];
       };

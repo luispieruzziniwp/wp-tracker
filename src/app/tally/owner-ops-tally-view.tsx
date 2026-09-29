@@ -1,13 +1,36 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { LayoutDashboard, ListChecks, LogOut, Undo2 } from "lucide-react";
-import type { EventType } from "@/lib/supabase/database.types";
+import type { EventSource, EventType } from "@/lib/supabase/database.types";
 import { TALLY_EVENTS, labelForEventType } from "@/lib/tally-events";
+import { SOURCES, SOURCE_COLOR, SOURCE_LABEL } from "@/lib/sources";
 
 type Counts = Record<EventType, number>;
-type TodayEvent = { id: string; type: EventType; occurred_at: string };
+type TodayEvent = {
+  id: string;
+  type: EventType;
+  occurred_at: string;
+  source: EventSource | null;
+};
+
+// These are the only types that prompt for a lead source before logging.
+// Everything else (canceled, rescheduled, podcast_*) keeps logging on a
+// single click with source: null.
+const SOURCE_PROMPT_TYPES = new Set<EventType>([
+  "sales_call_scheduled",
+  "sales_call_done",
+  "intro_call_scheduled",
+  "intro_call_done",
+  "verbal_agreement",
+  "paid",
+]);
+
+function toastWithSource(base: string, source: EventSource): string {
+  const withoutCheck = base.replace(/\s*✓\s*$/, "");
+  return `${withoutCheck} · ${SOURCE_LABEL[source]} ✓`;
+}
 
 type ColumnKey = "scheduled" | "done" | "canceled" | "rescheduled";
 
@@ -89,6 +112,71 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+type OnTap = (type: EventType, toastText: string, source?: EventSource | null) => void;
+
+// Shared open/close/outside-click/Escape/1-5 behavior for a source-picker
+// popover anchored to a trigger button. Takes no callback up front — the
+// caller keeps onPickRef.current pointed at its latest handler each render,
+// which sidesteps ordering issues between this hook's setOpen and a
+// useCallback below it that also needs to call setOpen.
+function useSourcePopover() {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const onPickRef = useRef<((source: EventSource) => void) | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      const num = Number(e.key);
+      if (Number.isInteger(num) && num >= 1 && num <= SOURCES.length) {
+        onPickRef.current?.(SOURCES[num - 1].key);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return { open, setOpen, containerRef, onPickRef };
+}
+
+function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
+  return (
+    <div
+      role="menu"
+      aria-label="Choose lead source"
+      className="absolute left-1/2 top-full z-30 mt-2 flex -translate-x-1/2 gap-1 rounded-xl border border-border bg-card p-1.5 shadow-xl"
+    >
+      {SOURCES.map((s) => (
+        <button
+          key={s.key}
+          type="button"
+          role="menuitem"
+          onClick={() => onPick(s.key)}
+          className={`flex flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent active:scale-[0.97] ${FOCUS_RING}`}
+        >
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+          {s.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function OwnerOpsTallyView({
   displayName,
   counts,
@@ -110,7 +198,7 @@ export function OwnerOpsTallyView({
   undoing: boolean;
   lastEventId: string | null;
   pillMessage: string | null;
-  onTap: (type: EventType, toastText: string) => void;
+  onTap: OnTap;
   onUndo: () => void;
   onSignOut: () => void;
 }) {
@@ -256,7 +344,7 @@ function MatrixCard({
 }: {
   counts: Counts;
   pendingType: EventType | null;
-  onTap: (type: EventType, toastText: string) => void;
+  onTap: OnTap;
   size: "desktop" | "mobile";
 }) {
   const cellHeight = size === "desktop" ? 76 : 64;
@@ -329,33 +417,58 @@ function MatrixCell({
   count: number;
   pending: boolean;
   height: number;
-  onTap: (type: EventType, toastText: string) => void;
+  onTap: OnTap;
 }) {
   const style = CELL_STYLES[column];
   const fullLabel = labelForEventType(eventType).toLowerCase();
-  const toastText = TOAST_BY_TYPE[eventType] ?? `${labelForEventType(eventType)} ✓`;
+  const baseToast = TOAST_BY_TYPE[eventType] ?? `${labelForEventType(eventType)} ✓`;
+  const needsSource = SOURCE_PROMPT_TYPES.has(eventType);
+
+  const { open, setOpen, containerRef, onPickRef } = useSourcePopover();
+
+  const handlePick = useCallback(
+    (source: EventSource) => {
+      onTap(eventType, toastWithSource(baseToast, source), source);
+      setOpen(false);
+    },
+    [eventType, baseToast, onTap, setOpen],
+  );
+  onPickRef.current = handlePick;
+
+  function handleClick() {
+    if (needsSource) {
+      setOpen((o) => !o);
+    } else {
+      onTap(eventType, baseToast, null);
+    }
+  }
 
   return (
-    <button
-      type="button"
-      onClick={() => onTap(eventType, toastText)}
-      disabled={pending}
-      aria-label={`Log ${fullLabel}, ${count} today`}
-      className={`flex items-center justify-center rounded-xl border font-bold tabular-nums transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
-      style={{
-        height,
-        backgroundColor: style.bg,
-        borderColor: style.border,
-        color: style.text,
-        fontSize: 28,
-      }}
-    >
-      {pending ? (
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      ) : (
-        count
-      )}
-    </button>
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={pending}
+        aria-label={`Log ${fullLabel}, ${count} today`}
+        aria-haspopup={needsSource ? "menu" : undefined}
+        aria-expanded={needsSource ? open : undefined}
+        className={`flex w-full items-center justify-center rounded-xl border font-bold tabular-nums transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+        style={{
+          height,
+          backgroundColor: style.bg,
+          borderColor: style.border,
+          color: style.text,
+          fontSize: 28,
+        }}
+      >
+        {pending ? (
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          count
+        )}
+      </button>
+      {needsSource && open && <SourceMenu onPick={handlePick} />}
+    </div>
   );
 }
 
@@ -366,7 +479,7 @@ function OutcomesCard({
 }: {
   counts: Counts;
   pendingType: EventType | null;
-  onTap: (type: EventType, toastText: string) => void;
+  onTap: OnTap;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
@@ -402,23 +515,40 @@ function OutcomeButton({
   label: string;
   count: number;
   pending: boolean;
-  onTap: (type: EventType, toastText: string) => void;
+  onTap: OnTap;
 }) {
-  const toastText = TOAST_BY_TYPE[type] ?? `${label} ✓`;
+  const baseToast = TOAST_BY_TYPE[type] ?? `${label} ✓`;
+
+  const { open, setOpen, containerRef, onPickRef } = useSourcePopover();
+
+  const handlePick = useCallback(
+    (source: EventSource) => {
+      onTap(type, toastWithSource(baseToast, source), source);
+      setOpen(false);
+    },
+    [type, baseToast, onTap, setOpen],
+  );
+  onPickRef.current = handlePick;
+
   return (
-    <button
-      type="button"
-      onClick={() => onTap(type, toastText)}
-      disabled={pending}
-      aria-label={`Log ${label.toLowerCase()}, ${count} today`}
-      className={`flex items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
-      style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
-    >
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
-        {pending ? "…" : count}
-      </span>
-    </button>
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={pending}
+        aria-label={`Log ${label.toLowerCase()}, ${count} today`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+        style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
+      >
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
+          {pending ? "…" : count}
+        </span>
+      </button>
+      {open && <SourceMenu onPick={handlePick} />}
+    </div>
   );
 }
 
@@ -489,6 +619,17 @@ function TodayLogCard({
                   aria-hidden
                 />
                 <span className="flex-1 truncate">{labelForEventType(evt.type)}</span>
+                {evt.source && (
+                  <span
+                    className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      backgroundColor: `${SOURCE_COLOR[evt.source]}26`,
+                      color: SOURCE_COLOR[evt.source],
+                    }}
+                  >
+                    {SOURCE_LABEL[evt.source]}
+                  </span>
+                )}
                 <span className="shrink-0 text-xs tabular-nums" style={{ color: "#9CC7D4" }}>
                   {formatTime(evt.occurred_at)}
                 </span>

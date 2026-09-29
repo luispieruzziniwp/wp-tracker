@@ -20,12 +20,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
-import type { UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
+import type { EventSource, EventType, UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
 import { CHART_AXIS, CHART_COLORS, CHART_GRID } from "@/lib/chart-colors";
+import { SOURCES } from "@/lib/sources";
 import {
   RANGE_OPTIONS,
   RangeOption,
-  WeeklyEvent,
   formatCurrency,
   formatRate,
   formatWeekLabel,
@@ -41,6 +41,26 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 };
 
+// Extends the shape mergeWeeklyData() reads (type, occurred_at) with the new
+// source column, used only for the "By source" section below — the history
+// merge itself is untouched and never reads this extra field.
+type SourceEvent = { type: EventType; occurred_at: string; source: EventSource | null };
+
+const SOURCE_METRIC_TYPES = new Set<EventType>([
+  "sales_call_done",
+  "intro_call_done",
+  "verbal_agreement",
+  "paid",
+]);
+
+function formatFullDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const supabase = createClient();
@@ -49,8 +69,9 @@ export default function DashboardClient() {
   const [role, setRole] = useState<UserRole | null>(null);
   const [range, setRange] = useState<RangeOption>("month");
   const [weeklyStatsRows, setWeeklyStatsRows] = useState<WeeklyStatsRow[]>([]);
-  const [eventRows, setEventRows] = useState<WeeklyEvent[]>([]);
+  const [eventRows, setEventRows] = useState<SourceEvent[]>([]);
   const [fetching, setFetching] = useState(false);
+  const [sourceTrackingStartedAt, setSourceTrackingStartedAt] = useState<string | null>(null);
 
   const loadRole = useCallback(async () => {
     setLoading(true);
@@ -93,7 +114,7 @@ export default function DashboardClient() {
 
     let eventsQuery = supabase
       .from("events")
-      .select("type, occurred_at")
+      .select("type, occurred_at, source")
       .order("occurred_at", { ascending: true });
     if (start) {
       eventsQuery = eventsQuery.gte("occurred_at", start);
@@ -123,6 +144,20 @@ export default function DashboardClient() {
       loadStats();
     }
   }, [role, loadStats]);
+
+  // Independent of the range toggle — this is an absolute fact about the
+  // whole account's history, not something that should change as you filter.
+  useEffect(() => {
+    if (role !== "owner" && role !== "ops") return;
+    supabase
+      .from("events")
+      .select("occurred_at")
+      .not("source", "is", null)
+      .order("occurred_at", { ascending: true })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setSourceTrackingStartedAt(data?.occurred_at ?? null));
+  }, [role, supabase]);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -176,6 +211,45 @@ export default function DashboardClient() {
       })),
     [weeks],
   );
+
+  const bySource = useMemo(() => {
+    const zero = () => Object.fromEntries(SOURCES.map((s) => [s.key, 0])) as Record<EventSource, number>;
+    const introCallsDone = zero();
+    const salesCallsDone = zero();
+    const verbalAgreements = zero();
+    const paid = zero();
+
+    for (const row of eventRows) {
+      if (!row.source || !SOURCE_METRIC_TYPES.has(row.type)) continue;
+      if (row.type === "intro_call_done") introCallsDone[row.source] += 1;
+      else if (row.type === "sales_call_done") salesCallsDone[row.source] += 1;
+      else if (row.type === "verbal_agreement") verbalAgreements[row.source] += 1;
+      else if (row.type === "paid") paid[row.source] += 1;
+    }
+
+    const chartData = [
+      { metric: "Sales Calls Done", ...salesCallsDone },
+      { metric: "Intro Calls Done", ...introCallsDone },
+      { metric: "Paid", ...paid },
+    ];
+
+    const rows = SOURCES.map((s) => {
+      const sc = salesCallsDone[s.key];
+      const p = paid[s.key];
+      return {
+        source: s.key,
+        label: s.label,
+        color: s.color,
+        introCallsDone: introCallsDone[s.key],
+        salesCallsDone: sc,
+        verbalAgreements: verbalAgreements[s.key],
+        paid: p,
+        closeRate: sc > 0 ? p / sc : null,
+      };
+    });
+
+    return { chartData, rows };
+  }, [eventRows]);
 
   const setterFunnel = useMemo(() => {
     const totals = { dial: 0, dial_answered: 0, appointment_booked: 0, appointment_converted: 0 };
@@ -349,6 +423,71 @@ export default function DashboardClient() {
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
+          </section>
+
+          <section className="grid grid-cols-1 gap-4">
+            <ChartCard title="By Source">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={bySource.chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_GRID} vertical={false} />
+                  <XAxis dataKey="metric" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {SOURCES.map((s) => (
+                    <Bar key={s.key} dataKey={s.key} name={s.label} stackId="source" fill={s.color} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground">Source Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="py-2 pr-4 font-medium">Source</th>
+                        <th className="py-2 pr-4 text-right font-medium">Intro Calls Done</th>
+                        <th className="py-2 pr-4 text-right font-medium">Sales Calls Done</th>
+                        <th className="py-2 pr-4 text-right font-medium">Verbal Agreements</th>
+                        <th className="py-2 pr-4 text-right font-medium">Paid</th>
+                        <th className="py-2 text-right font-medium">Close Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bySource.rows.map((row) => (
+                        <tr key={row.source} className="border-b border-border last:border-0">
+                          <td className="py-2 pr-4">
+                            <span className="inline-flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: row.color }}
+                                aria-hidden
+                              />
+                              {row.label}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-4 text-right tabular-nums">{row.introCallsDone}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums">{row.salesCallsDone}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums">{row.verbalAgreements}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums">{row.paid}</td>
+                          <td className="py-2 text-right tabular-nums">{formatRate(row.closeRate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {sourceTrackingStartedAt
+                    ? `Source tracking started ${formatFullDate(sourceTrackingStartedAt)}`
+                    : "Source tracking hasn't started yet."}
+                </p>
+              </CardContent>
+            </Card>
           </section>
         </>
       )}

@@ -20,7 +20,7 @@ import { AppShell } from "@/components/app-shell";
 import { OwnerOpsTallyView } from "./owner-ops-tally-view";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import type { EventType, UserRole } from "@/lib/supabase/database.types";
+import type { EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import {
   SETTER_EVENTS,
   type EventTone,
@@ -28,7 +28,12 @@ import {
   startOfWeekISO,
 } from "@/lib/tally-events";
 
-type TodayEvent = { id: string; type: EventType; occurred_at: string };
+type TodayEvent = {
+  id: string;
+  type: EventType;
+  occurred_at: string;
+  source: EventSource | null;
+};
 
 type Counts = Record<EventType, number>;
 
@@ -122,7 +127,7 @@ export default function TallyClient() {
     if (profile?.role === "owner" || profile?.role === "ops" || profile?.role === "setter") {
       const { data: events } = await supabase
         .from("events")
-        .select("id, type, occurred_at")
+        .select("id, type, occurred_at, source")
         .eq("user_id", user.id)
         .gte("occurred_at", startOfWeekISO())
         .order("occurred_at", { ascending: false });
@@ -136,7 +141,12 @@ export default function TallyClient() {
           nextWeek[row.type as EventType] += 1;
           if (row.occurred_at >= todayStart) {
             nextToday[row.type as EventType] += 1;
-            nextTodayEvents.push({ id: row.id, type: row.type as EventType, occurred_at: row.occurred_at });
+            nextTodayEvents.push({
+              id: row.id,
+              type: row.type as EventType,
+              occurred_at: row.occurred_at,
+              source: row.source,
+            });
           }
         }
       }
@@ -163,7 +173,11 @@ export default function TallyClient() {
     pillTimerRef.current = setTimeout(() => setPillMessage(null), 1400);
   }
 
-  async function handleTap(type: EventType, toastText: string) {
+  async function handleTap(
+    type: EventType,
+    toastText: string,
+    source: EventSource | null = null,
+  ) {
     setPendingType(type);
 
     // Optimistic update — reflect the tap instantly, roll back on failure.
@@ -181,7 +195,7 @@ export default function TallyClient() {
 
     const { data, error } = await supabase
       .from("events")
-      .insert({ user_id: user.id, type })
+      .insert({ user_id: user.id, type, source })
       .select("id")
       .single();
 
@@ -197,7 +211,7 @@ export default function TallyClient() {
     setLastEventId(data?.id ?? null);
     if (data?.id) {
       setTodayEvents((list) => [
-        { id: data.id, type, occurred_at: new Date().toISOString() },
+        { id: data.id, type, occurred_at: new Date().toISOString(), source },
         ...list,
       ]);
     }
