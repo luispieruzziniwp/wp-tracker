@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Check, LayoutDashboard, ListChecks, LogOut } from "lucide-react";
+import { Check, LayoutDashboard, ListChecks, LogOut, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { UserRole } from "@/lib/supabase/database.types";
@@ -15,6 +15,7 @@ const NAV_ITEMS: {
 }[] = [
   { href: "/tally", label: "Tally", roles: ["owner", "ops", "setter"], icon: ListChecks },
   { href: "/dashboard", label: "Dashboard", roles: ["owner", "ops"], icon: LayoutDashboard },
+  { href: "/dripify", label: "Dripify", roles: ["owner", "ops"], icon: Send },
 ];
 
 export function AppShell({

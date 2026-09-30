@@ -77,6 +77,21 @@ export function mondayOf(dateInput: string | Date): string {
   return formatDateLocal(monday);
 }
 
+// Monday (YYYY-MM-DD, local calendar) of the previous week.
+export function lastWeekMonday(): string {
+  const d = new Date(`${mondayOf(new Date())}T00:00:00`);
+  d.setDate(d.getDate() - 7);
+  return formatDateLocal(d);
+}
+
+export function isMonday(dateStr: string): boolean {
+  return new Date(`${dateStr}T00:00:00`).getDay() === 1;
+}
+
+export function weekEndFor(weekStart: string): string {
+  return weekEndOf(weekStart);
+}
+
 function weekEndOf(weekStart: string): string {
   const d = new Date(`${weekStart}T00:00:00`);
   d.setDate(d.getDate() + 6);
