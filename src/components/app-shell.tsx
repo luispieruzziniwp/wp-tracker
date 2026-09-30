@@ -1,22 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Check, LayoutDashboard, ListChecks, LogOut, Send } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NavLinks } from "@/components/nav-links";
 import type { UserRole } from "@/lib/supabase/database.types";
-
-const NAV_ITEMS: {
-  href: string;
-  label: string;
-  roles: UserRole[];
-  icon: typeof ListChecks;
-}[] = [
-  { href: "/tally", label: "Tally", roles: ["owner", "ops", "setter"], icon: ListChecks },
-  { href: "/dashboard", label: "Dashboard", roles: ["owner", "ops"], icon: LayoutDashboard },
-  { href: "/dripify", label: "Dripify", roles: ["owner", "ops"], icon: Send },
-];
 
 export function AppShell({
   role,
@@ -27,9 +14,6 @@ export function AppShell({
   onSignOut: () => void;
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const items = NAV_ITEMS.filter((item) => role && item.roles.includes(role));
-
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <header className="sticky top-0 z-20 hidden border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:block">
@@ -42,25 +26,7 @@ export function AppShell({
               Wisdom Partners
             </span>
           </div>
-          <nav className="flex items-center gap-1">
-            {items.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+          <NavLinks role={role} variant="top" />
           <Button variant="ghost" size="sm" onClick={onSignOut} className="gap-1.5">
             <LogOut className="h-4 w-4" />
             Sign out
@@ -77,23 +43,7 @@ export function AppShell({
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="mx-auto flex max-w-md items-stretch">
-          {items.map((item) => {
-            const active = pathname === item.href;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors active:scale-95",
-                  active ? "text-primary" : "text-muted-foreground",
-                )}
-              >
-                <Icon className="h-5 w-5" strokeWidth={active ? 2.5 : 2} />
-                {item.label}
-              </Link>
-            );
-          })}
+          <NavLinks role={role} variant="bottom" />
           <button
             type="button"
             onClick={onSignOut}

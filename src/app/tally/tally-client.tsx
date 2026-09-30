@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
+import { homeForRole } from "@/components/nav-links";
 import { OwnerOpsTallyView } from "./owner-ops-tally-view";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -81,7 +82,7 @@ const TONE_CLASSES: Record<EventTone, string> = {
   negative: "border-negative/30 bg-negative/10 text-negative hover:bg-negative/15",
 };
 
-export default function TallyClient() {
+export default function TallyClient({ view }: { view: "tally" | "setter" }) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -121,7 +122,12 @@ export default function TallyClient() {
       .eq("id", user.id)
       .maybeSingle();
 
-    setRole(profile?.role ?? null);
+    const nextRole = profile?.role ?? null;
+    if (nextRole === "setter" && view !== "setter") {
+      router.replace(homeForRole(nextRole));
+      return;
+    }
+    setRole(nextRole);
     setDisplayName(profile?.display_name ?? null);
 
     if (profile?.role === "owner" || profile?.role === "ops" || profile?.role === "setter") {
@@ -157,14 +163,14 @@ export default function TallyClient() {
     }
 
     setLoading(false);
-  }, [router, supabase]);
+  }, [router, supabase, view]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   function showToast(message: string) {
-    if (role === "setter") {
+    if (view === "setter") {
       toast.success(message);
       return;
     }
@@ -300,7 +306,7 @@ export default function TallyClient() {
     );
   }
 
-  if (role === "setter") {
+  if (view === "setter") {
     return (
       <AppShell role={role} onSignOut={handleSignOut}>
         <div className="flex flex-col gap-5">
@@ -350,6 +356,7 @@ export default function TallyClient() {
 
   return (
     <OwnerOpsTallyView
+      role={role}
       displayName={displayName}
       counts={counts}
       weekCounts={weekCounts}

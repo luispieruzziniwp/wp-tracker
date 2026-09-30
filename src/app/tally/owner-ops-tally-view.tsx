@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { LayoutDashboard, ListChecks, LogOut, Undo2 } from "lucide-react";
-import type { EventSource, EventType } from "@/lib/supabase/database.types";
+import { LogOut, Undo2 } from "lucide-react";
+import { NavLinks } from "@/components/nav-links";
+import type { EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import { TALLY_EVENTS, labelForEventType } from "@/lib/tally-events";
 import { SOURCES, SOURCE_COLOR, SOURCE_LABEL } from "@/lib/sources";
 
@@ -178,6 +178,7 @@ function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
 }
 
 export function OwnerOpsTallyView({
+  role,
   displayName,
   counts,
   weekCounts,
@@ -190,6 +191,7 @@ export function OwnerOpsTallyView({
   onUndo,
   onSignOut,
 }: {
+  role: UserRole;
   displayName: string | null;
   counts: Counts;
   weekCounts: Counts;
@@ -212,7 +214,7 @@ export function OwnerOpsTallyView({
     <>
       {/* Desktop (>=1024px) */}
       <div className="hidden h-dvh flex-col overflow-hidden bg-background lg:flex">
-        <DesktopTopBar todayLabel={todayLabel} />
+        <DesktopTopBar todayLabel={todayLabel} role={role} />
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-10 py-7">
           <h1 className="mb-5 shrink-0 font-serif text-[34px] leading-none">Tally</h1>
           <div className="grid min-h-0 flex-1 gap-5" style={{ gridTemplateColumns: "2fr 1fr" }}>
@@ -254,7 +256,7 @@ export function OwnerOpsTallyView({
             {undoing ? "Undoing…" : "Undo last"}
           </button>
         </div>
-        <MobileTabBar onSignOut={onSignOut} />
+        <MobileTabBar onSignOut={onSignOut} role={role} />
       </div>
 
       {pillMessage && (
@@ -271,7 +273,7 @@ export function OwnerOpsTallyView({
   );
 }
 
-function DesktopTopBar({ todayLabel }: { todayLabel: string }) {
+function DesktopTopBar({ todayLabel, role }: { todayLabel: string; role: UserRole }) {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card px-10">
       <div className="flex items-baseline gap-2">
@@ -280,49 +282,20 @@ function DesktopTopBar({ todayLabel }: { todayLabel: string }) {
           Partners
         </span>
       </div>
-      <nav className="flex items-center gap-1">
-        <span
-          className="rounded-lg px-4 py-2 text-sm font-medium"
-          style={{ backgroundColor: COLORS.navActiveBg, color: "#3FB8C9" }}
-        >
-          Tally
-        </span>
-        <span aria-disabled="true" tabIndex={-1} className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground">
-          Setter
-        </span>
-        <Link
-          href="/dashboard"
-          className={`rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground ${FOCUS_RING}`}
-        >
-          Dashboard
-        </Link>
-      </nav>
+      <NavLinks role={role} variant="top" />
       <div className="text-sm text-muted-foreground">{todayLabel}</div>
     </header>
   );
 }
 
-function MobileTabBar({ onSignOut }: { onSignOut: () => void }) {
+function MobileTabBar({ onSignOut, role }: { onSignOut: () => void; role: UserRole }) {
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-20 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="mx-auto flex max-w-md items-stretch">
-        <Link
-          href="/tally"
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-primary active:scale-95"
-        >
-          <ListChecks className="h-5 w-5" strokeWidth={2.5} />
-          Tally
-        </Link>
-        <Link
-          href="/dashboard"
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-muted-foreground transition-colors active:scale-95"
-        >
-          <LayoutDashboard className="h-5 w-5" />
-          Dashboard
-        </Link>
+        <NavLinks role={role} variant="bottom" />
         <button
           type="button"
           onClick={onSignOut}
