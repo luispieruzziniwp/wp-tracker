@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
-import type { EventSource, EventType, UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
+import type { EventBilling, EventSource, EventType, UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
 import { CHART_AXIS, CHART_COLORS, CHART_GRID } from "@/lib/chart-colors";
 import { SOURCES } from "@/lib/sources";
 import {
@@ -44,7 +44,13 @@ const TOOLTIP_STYLE = {
 // Extends the shape mergeWeeklyData() reads (type, occurred_at) with the new
 // source column, used only for the "By source" section below — the history
 // merge itself is untouched and never reads this extra field.
-type SourceEvent = { type: EventType; occurred_at: string; source: EventSource | null };
+type SourceEvent = {
+  type: EventType;
+  occurred_at: string;
+  source: EventSource | null;
+  amount: number | null;
+  billing: EventBilling | null;
+};
 
 const SOURCE_METRIC_TYPES = new Set<EventType>([
   "sales_call_done",
@@ -114,7 +120,7 @@ export default function DashboardClient() {
 
     let eventsQuery = supabase
       .from("events")
-      .select("type, occurred_at, source")
+      .select("type, occurred_at, source, amount, billing")
       .order("occurred_at", { ascending: true });
     if (start) {
       eventsQuery = eventsQuery.gte("occurred_at", start);
@@ -180,6 +186,17 @@ export default function DashboardClient() {
     const enrollments = sum(weeks.map((w) => w.enrollments));
     const salesAmount = sum(weeks.map((w) => w.sales_amount));
 
+    let eventSales = 0;
+    let newMrr = 0;
+    let oneTime = 0;
+    for (const row of eventRows) {
+      if (row.type !== "paid" || !row.amount) continue;
+      const amount = Number(row.amount);
+      eventSales += amount;
+      if (row.billing === "monthly") newMrr += amount;
+      else if (row.billing === "one_time") oneTime += amount;
+    }
+
     return {
       connectionRequestsSent,
       connectionsAccepted,
@@ -188,12 +205,14 @@ export default function DashboardClient() {
       podcastsDone,
       salesCallsDone,
       enrollments,
-      salesAmount,
+      salesAmount: salesAmount + eventSales,
+      newMrr,
+      oneTime,
       acceptanceRate: safeRate(connectionsAccepted, connectionRequestsSent),
       replyRate: safeRate(leadsReplied, connectionsAccepted),
       enrollmentRate: safeRate(enrollments, salesCallsDone),
     };
-  }, [weeks]);
+  }, [weeks, eventRows]);
 
   const chartData = useMemo(
     () =>
@@ -320,7 +339,11 @@ export default function DashboardClient() {
             <StatCard label="Podcasts Done" value={totals.podcastsDone} />
             <StatCard label="Sales Calls Done" value={totals.salesCallsDone} />
             <StatCard label="Enrollments" value={totals.enrollments} />
-            <StatCard label="Total Sales" value={formatCurrency(totals.salesAmount)} />
+            <StatCard
+              label="Total Sales"
+              value={formatCurrency(totals.salesAmount)}
+              sub={`New MRR ${formatCurrency(totals.newMrr)} · One-time ${formatCurrency(totals.oneTime)}`}
+            />
           </section>
 
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -496,12 +519,21 @@ export default function DashboardClient() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number | string }) {
+function StatCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: number | string;
+  sub?: string;
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-1 p-4">
         <span className="text-xs text-muted-foreground">{label}</span>
         <span className="text-2xl font-bold tabular-nums">{value}</span>
+        {sub && <span className="text-[11px] text-muted-foreground">{sub}</span>}
       </CardContent>
     </Card>
   );

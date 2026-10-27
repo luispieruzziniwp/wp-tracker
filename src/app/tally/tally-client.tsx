@@ -21,20 +21,24 @@ import { homeForRole } from "@/components/nav-links";
 import { OwnerOpsTallyView } from "./owner-ops-tally-view";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import type { EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
+import type { EventBilling, EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import {
   SETTER_EVENTS,
   type EventTone,
-  startOfTodayISO,
   startOfWeekISO,
 } from "@/lib/tally-events";
+import { dayBoundsISO, localDateKey, noonISO } from "@/lib/tally-dates";
 
 type TodayEvent = {
   id: string;
   type: EventType;
   occurred_at: string;
   source: EventSource | null;
+  amount: number | null;
+  billing: EventBilling | null;
 };
+
+export type PaidExtra = { amount: number; billing: EventBilling };
 
 type Counts = Record<EventType, number>;
 
@@ -96,6 +100,8 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
   const [lastEventId, setLastEventId] = useState<string | null>(null);
   const [todayEvents, setTodayEvents] = useState<TodayEvent[]>([]);
   const [pillMessage, setPillMessage] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => localDateKey());
+  const loadSeqRef = useRef(0);
   const pillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -105,7 +111,7 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
   }, []);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    const seq = ++loadSeqRef.current;
 
     const {
       data: { user },
@@ -131,39 +137,44 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
     setDisplayName(profile?.display_name ?? null);
 
     if (profile?.role === "owner" || profile?.role === "ops" || profile?.role === "setter") {
+      const weekStart = startOfWeekISO();
+      const { start: dayStart, end: dayEnd } = dayBoundsISO(selectedDate);
       const { data: events } = await supabase
         .from("events")
-        .select("id, type, occurred_at, source")
+        .select("id, type, occurred_at, source, amount, billing")
         .eq("user_id", user.id)
-        .gte("occurred_at", startOfWeekISO())
+        .gte("occurred_at", dayStart < weekStart ? dayStart : weekStart)
         .order("occurred_at", { ascending: false });
 
-      const todayStart = startOfTodayISO();
+      // A newer date selection superseded this load; drop the stale result.
+      if (seq !== loadSeqRef.current) return;
+
       const nextToday = { ...EMPTY_COUNTS };
       const nextWeek = { ...EMPTY_COUNTS };
       const nextTodayEvents: TodayEvent[] = [];
       for (const row of events ?? []) {
-        if (row.type in nextWeek) {
-          nextWeek[row.type as EventType] += 1;
-          if (row.occurred_at >= todayStart) {
-            nextToday[row.type as EventType] += 1;
-            nextTodayEvents.push({
-              id: row.id,
-              type: row.type as EventType,
-              occurred_at: row.occurred_at,
-              source: row.source,
-            });
-          }
+        if (!(row.type in nextWeek)) continue;
+        if (row.occurred_at >= weekStart) nextWeek[row.type as EventType] += 1;
+        if (row.occurred_at >= dayStart && row.occurred_at < dayEnd) {
+          nextToday[row.type as EventType] += 1;
+          nextTodayEvents.push({
+            id: row.id,
+            type: row.type as EventType,
+            occurred_at: row.occurred_at,
+            source: row.source,
+            amount: row.amount === null ? null : Number(row.amount),
+            billing: row.billing,
+          });
         }
       }
       setCounts(nextToday);
       setWeekCounts(nextWeek);
       setTodayEvents(nextTodayEvents);
-      setLastEventId(events && events.length > 0 ? events[0].id : null);
+      setLastEventId(nextTodayEvents.length > 0 ? nextTodayEvents[0].id : null);
     }
 
     setLoading(false);
-  }, [router, supabase, view]);
+  }, [router, supabase, view, selectedDate]);
 
   useEffect(() => {
     loadData();
@@ -183,12 +194,17 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
     type: EventType,
     toastText: string,
     source: EventSource | null = null,
+    paid: PaidExtra | null = null,
   ) {
     setPendingType(type);
 
+    const isToday = selectedDate === localDateKey();
+    const occurredAt = isToday ? new Date().toISOString() : noonISO(selectedDate);
+    const inWeek = occurredAt >= startOfWeekISO();
+
     // Optimistic update — reflect the tap instantly, roll back on failure.
     setCounts((c) => ({ ...c, [type]: c[type] + 1 }));
-    setWeekCounts((c) => ({ ...c, [type]: c[type] + 1 }));
+    if (inWeek) setWeekCounts((c) => ({ ...c, [type]: c[type] + 1 }));
 
     const {
       data: { user },
@@ -201,7 +217,14 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
 
     const { data, error } = await supabase
       .from("events")
-      .insert({ user_id: user.id, type, source })
+      .insert({
+        user_id: user.id,
+        type,
+        source,
+        occurred_at: occurredAt,
+        amount: paid?.amount ?? null,
+        billing: paid?.billing ?? null,
+      })
       .select("id")
       .single();
 
@@ -209,17 +232,26 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
 
     if (error) {
       setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
-      setWeekCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
+      if (inWeek) setWeekCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
       toast.error(error.message);
       return;
     }
 
-    setLastEventId(data?.id ?? null);
     if (data?.id) {
-      setTodayEvents((list) => [
-        { id: data.id, type, occurred_at: new Date().toISOString(), source },
-        ...list,
-      ]);
+      setLastEventId(data.id);
+      setTodayEvents((list) =>
+        [
+          {
+            id: data.id,
+            type,
+            occurred_at: occurredAt,
+            source,
+            amount: paid?.amount ?? null,
+            billing: paid?.billing ?? null,
+          },
+          ...list,
+        ].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
+      );
     }
     showToast(toastText);
   }
@@ -236,10 +268,13 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
       return;
     }
 
+    const { start: dayStart, end: dayEnd } = dayBoundsISO(selectedDate);
     const { data: last, error: fetchError } = await supabase
       .from("events")
       .select("id, type, occurred_at")
       .eq("user_id", user.id)
+      .gte("occurred_at", dayStart)
+      .lt("occurred_at", dayEnd)
       .order("occurred_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -270,13 +305,14 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
 
     if (last.type in EMPTY_COUNTS) {
       const type = last.type as EventType;
-      setWeekCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
-      if (last.occurred_at >= startOfTodayISO()) {
-        setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
+      if (last.occurred_at >= startOfWeekISO()) {
+        setWeekCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
       }
+      setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
     }
-    setTodayEvents((list) => list.filter((e) => e.id !== last.id));
-    setLastEventId(null);
+    const remaining = todayEvents.filter((e) => e.id !== last.id);
+    setTodayEvents(remaining);
+    setLastEventId(remaining.length > 0 ? remaining[0].id : null);
 
     showToast("Undid last entry");
   }
@@ -358,6 +394,8 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
     <OwnerOpsTallyView
       role={role}
       displayName={displayName}
+      selectedDate={selectedDate}
+      onSelectDate={setSelectedDate}
       counts={counts}
       weekCounts={weekCounts}
       todayEvents={todayEvents}

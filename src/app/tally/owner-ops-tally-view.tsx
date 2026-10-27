@@ -1,11 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, Undo2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut, Undo2 } from "lucide-react";
 import { NavLinks } from "@/components/nav-links";
-import type { EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
+import type { EventBilling, EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import { TALLY_EVENTS, labelForEventType } from "@/lib/tally-events";
 import { SOURCES, SOURCE_COLOR, SOURCE_LABEL } from "@/lib/sources";
+import {
+  formatDateKeyLong,
+  formatPaidAmount,
+  localDateKey,
+  shiftDateKey,
+} from "@/lib/tally-dates";
 
 type Counts = Record<EventType, number>;
 type TodayEvent = {
@@ -13,6 +19,8 @@ type TodayEvent = {
   type: EventType;
   occurred_at: string;
   source: EventSource | null;
+  amount: number | null;
+  billing: EventBilling | null;
 };
 
 // These are the only types that prompt for a lead source before logging.
@@ -24,7 +32,6 @@ const SOURCE_PROMPT_TYPES = new Set<EventType>([
   "intro_call_scheduled",
   "intro_call_done",
   "verbal_agreement",
-  "paid",
 ]);
 
 function toastWithSource(base: string, source: EventSource): string {
@@ -112,7 +119,12 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-type OnTap = (type: EventType, toastText: string, source?: EventSource | null) => void;
+type OnTap = (
+  type: EventType,
+  toastText: string,
+  source?: EventSource | null,
+  paid?: { amount: number; billing: EventBilling } | null,
+) => void;
 
 // Shared open/close/outside-click/Escape/1-5 behavior for a source-picker
 // popover anchored to a trigger button. Takes no callback up front — the
@@ -180,6 +192,8 @@ function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
 export function OwnerOpsTallyView({
   role,
   displayName,
+  selectedDate,
+  onSelectDate,
   counts,
   weekCounts,
   todayEvents,
@@ -193,6 +207,8 @@ export function OwnerOpsTallyView({
 }: {
   role: UserRole;
   displayName: string | null;
+  selectedDate: string;
+  onSelectDate: (key: string) => void;
   counts: Counts;
   weekCounts: Counts;
   todayEvents: TodayEvent[];
@@ -209,6 +225,12 @@ export function OwnerOpsTallyView({
     [],
   );
   const visibleLog = todayEvents.slice(0, 6);
+  const todayKey = localDateKey();
+  const isPast = selectedDate !== todayKey;
+  const dateLabel = formatDateKeyLong(selectedDate);
+  const banner = isPast ? (
+    <PastDateBanner label={dateLabel} onBack={() => onSelectDate(todayKey)} />
+  ) : null;
 
   return (
     <>
@@ -216,9 +238,13 @@ export function OwnerOpsTallyView({
       <div className="hidden h-dvh flex-col overflow-hidden bg-background lg:flex">
         <DesktopTopBar todayLabel={todayLabel} role={role} />
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-10 py-7">
-          <h1 className="mb-5 shrink-0 font-serif text-[34px] leading-none">Tally</h1>
+          <div className="mb-5 flex shrink-0 items-center gap-4">
+            <h1 className="font-serif text-[34px] leading-none">Tally</h1>
+            <DateControl selectedDate={selectedDate} todayKey={todayKey} onChange={onSelectDate} />
+          </div>
           <div className="grid min-h-0 flex-1 gap-5" style={{ gridTemplateColumns: "2fr 1fr" }}>
             <div className="flex min-h-0 flex-col gap-5">
+              {banner}
               <MatrixCard counts={counts} pendingType={pendingType} onTap={onTap} size="desktop" />
               <OutcomesCard counts={counts} pendingType={pendingType} onTap={onTap} />
             </div>
@@ -226,6 +252,8 @@ export function OwnerOpsTallyView({
               <WeekCard weekCounts={weekCounts} />
               <TodayLogCard
                 events={visibleLog}
+                isPast={isPast}
+                dateLabel={dateLabel}
                 undoing={undoing}
                 lastEventId={lastEventId}
                 onUndo={onUndo}
@@ -239,10 +267,14 @@ export function OwnerOpsTallyView({
       {/* Mobile (<1024px) */}
       <div className="flex min-h-dvh flex-col bg-background pb-24 lg:hidden">
         <div className="px-4 pb-1 pt-6">
-          <h1 className="font-serif text-2xl tracking-tight">Tally</h1>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="font-serif text-2xl tracking-tight">Tally</h1>
+            <DateControl selectedDate={selectedDate} todayKey={todayKey} onChange={onSelectDate} />
+          </div>
           {displayName && <p className="text-sm text-muted-foreground">Hey, {displayName}</p>}
         </div>
         <div className="flex flex-col gap-4 px-4 py-5">
+          {banner}
           <WeekCard weekCounts={weekCounts} compact />
           <MatrixCard counts={counts} pendingType={pendingType} onTap={onTap} size="mobile" />
           <OutcomesCard counts={counts} pendingType={pendingType} onTap={onTap} />
@@ -465,13 +497,7 @@ function OutcomesCard({
           pending={pendingType === "verbal_agreement"}
           onTap={onTap}
         />
-        <OutcomeButton
-          type="paid"
-          label="Paid"
-          count={counts.paid}
-          pending={pendingType === "paid"}
-          onTap={onTap}
-        />
+        <PaidButton count={counts.paid} pending={pendingType === "paid"} onTap={onTap} />
       </div>
     </div>
   );
@@ -552,12 +578,16 @@ function WeekCard({ weekCounts, compact }: { weekCounts: Counts; compact?: boole
 
 function TodayLogCard({
   events,
+  isPast,
+  dateLabel,
   undoing,
   lastEventId,
   onUndo,
   className = "",
 }: {
   events: TodayEvent[];
+  isPast: boolean;
+  dateLabel: string;
   undoing: boolean;
   lastEventId: string | null;
   onUndo: () => void;
@@ -566,7 +596,9 @@ function TodayLogCard({
   return (
     <div className={`flex flex-col rounded-2xl border border-border bg-card p-5 ${className}`}>
       <div className="mb-3 flex shrink-0 items-center justify-between">
-        <h2 className="font-serif text-lg leading-none">Today&apos;s log</h2>
+        <h2 className="font-serif text-lg leading-none">
+          {isPast ? `Log for ${dateLabel}` : "Today\u2019s log"}
+        </h2>
         <button
           type="button"
           onClick={onUndo}
@@ -580,7 +612,7 @@ function TodayLogCard({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {events.length === 0 ? (
           <p className="text-sm" style={{ color: "#9CC7D4" }}>
-            Nothing logged yet today.
+            {isPast ? "Nothing logged on this date." : "Nothing logged yet today."}
           </p>
         ) : (
           <ul className="flex flex-col gap-2.5">
@@ -591,7 +623,14 @@ function TodayLogCard({
                   style={{ backgroundColor: dotColor(evt.type) }}
                   aria-hidden
                 />
-                <span className="flex-1 truncate">{labelForEventType(evt.type)}</span>
+                <span className="flex-1 truncate">
+                  {labelForEventType(evt.type)}
+                  {evt.type === "paid" && evt.amount != null && evt.billing && (
+                    <span className="ml-1.5 font-semibold" style={{ color: "#4FD1A5" }}>
+                      {formatPaidAmount(evt.amount, evt.billing)}
+                    </span>
+                  )}
+                </span>
                 {evt.source && (
                   <span
                     className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
@@ -611,6 +650,269 @@ function TodayLogCard({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+function PastDateBanner({ label, onBack }: { label: string; onBack: () => void }) {
+  return (
+    <div
+      role="status"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3"
+      style={{ backgroundColor: "#3A2A0B", borderColor: "#F2C46D", color: "#F2C46D" }}
+    >
+      <span className="text-sm font-semibold">Logging for {label} — not today</span>
+      <button
+        type="button"
+        onClick={onBack}
+        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white/10 active:scale-[0.97] ${FOCUS_RING}`}
+        style={{ borderColor: "#F2C46D" }}
+      >
+        Back to today
+      </button>
+    </div>
+  );
+}
+
+function DateControl({
+  selectedDate,
+  todayKey,
+  onChange,
+}: {
+  selectedDate: string;
+  todayKey: string;
+  onChange: (key: string) => void;
+}) {
+  const atToday = selectedDate >= todayKey;
+  const btn = `flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground transition-colors hover:bg-accent active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${FOCUS_RING}`;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        aria-label="Previous day"
+        className={btn}
+        onClick={() => onChange(shiftDateKey(selectedDate, -1))}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+      <input
+        type="date"
+        aria-label="Choose date"
+        value={selectedDate}
+        max={todayKey}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v && v <= todayKey) onChange(v);
+        }}
+        className={`h-9 rounded-lg border border-border bg-card px-2 text-sm text-foreground [color-scheme:dark] ${FOCUS_RING}`}
+      />
+      <button
+        type="button"
+        aria-label="Next day"
+        className={btn}
+        disabled={atToday}
+        onClick={() => onChange(shiftDateKey(selectedDate, 1))}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// Paid asks for an amount (and billing cadence) before logging, so it can't
+// share useSourcePopover — that hook binds the 1-5 keys to source picks,
+// which would fire while typing the amount.
+function PaidButton({
+  count,
+  pending,
+  onTap,
+}: {
+  count: number;
+  pending: boolean;
+  onTap: OnTap;
+}) {
+  const [open, setOpen] = useState(false);
+  const [source, setSource] = useState<EventSource | null>(null);
+  const [amountText, setAmountText] = useState("");
+  const [billing, setBilling] = useState<EventBilling>("monthly");
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
+  const baseToast = TOAST_BY_TYPE.paid ?? "Paid ✓";
+
+  const close = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    amountRef.current?.focus();
+
+    function handlePointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") close();
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, close]);
+
+  function openPopover() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setSource(null);
+    setAmountText("");
+    setBilling("monthly");
+    setError(null);
+    setOpen(true);
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = Number(amountText);
+    if (!amountText.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setError("Enter an amount greater than 0");
+      amountRef.current?.focus();
+      return;
+    }
+    if (!source) {
+      setError("Choose a source");
+      return;
+    }
+    const rounded = Math.round(amount * 100) / 100;
+    const withoutCheck = baseToast.replace(/\s*✓\s*$/, "");
+    onTap(
+      "paid",
+      `${withoutCheck} · ${formatPaidAmount(rounded, billing)} · ${SOURCE_LABEL[source]} ✓`,
+      source,
+      { amount: rounded, billing },
+    );
+    close();
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={openPopover}
+        disabled={pending}
+        aria-label={`Log paid, ${count} today`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+        style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
+      >
+        <span className="text-sm font-medium text-foreground">Paid</span>
+        <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
+          {pending ? "…" : count}
+        </span>
+      </button>
+      {open && (
+        <form
+          role="dialog"
+          aria-label="Log paid"
+          onSubmit={submit}
+          className="absolute right-0 top-full z-30 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-xl"
+        >
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Source
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {SOURCES.map((src) => (
+                <button
+                  key={src.key}
+                  type="button"
+                  aria-pressed={source === src.key}
+                  onClick={() => setSource(src.key)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent ${FOCUS_RING}`}
+                  style={{ borderColor: source === src.key ? src.color : "transparent" }}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: src.color }} aria-hidden />
+                  {src.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Amount (USD)
+            </span>
+            <div className="flex items-center rounded-lg border border-border bg-background px-2">
+              <span className="text-sm text-muted-foreground">$</span>
+              <input
+                ref={amountRef}
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                step="0.01"
+                required
+                value={amountText}
+                onChange={(e) => {
+                  setAmountText(e.target.value);
+                  setError(null);
+                }}
+                className="h-9 w-full bg-transparent px-1.5 text-sm tabular-nums text-foreground outline-none"
+                placeholder="1000"
+              />
+            </div>
+          </label>
+
+          <div
+            role="radiogroup"
+            aria-label="Billing"
+            className="grid grid-cols-2 gap-1 rounded-lg border border-border p-1"
+          >
+            {(
+              [
+                ["monthly", "Monthly"],
+                ["one_time", "One-time"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={billing === value}
+                onClick={() => setBilling(value)}
+                className={`rounded-md py-1.5 text-xs font-semibold transition-colors ${FOCUS_RING} ${
+                  billing === value ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {error && (
+            <p role="alert" className="text-xs" style={{ color: "#F07A7A" }}>
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            className={`h-9 rounded-lg text-sm font-semibold transition-[filter,transform] hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}
+            style={{ backgroundColor: "#2E8C73", color: "#F2FAFC" }}
+          >
+            Log
+          </button>
+        </form>
+      )}
     </div>
   );
 }

@@ -29,6 +29,8 @@ export type EventSource =
   | "inbound"
   | "outbound";
 
+export type EventBilling = "one_time" | "monthly";
+
 export interface Database {
   public: {
     Tables: {
@@ -59,6 +61,8 @@ export interface Database {
           notes: string | null;
           outcome: string | null;
           source: EventSource | null;
+          amount: number | null;
+          billing: EventBilling | null;
         };
         Insert: {
           id?: string;
@@ -68,6 +72,8 @@ export interface Database {
           notes?: string | null;
           outcome?: string | null;
           source?: EventSource | null;
+          amount?: number | null;
+          billing?: EventBilling | null;
         };
         Update: {
           id?: string;
@@ -77,6 +83,8 @@ export interface Database {
           notes?: string | null;
           outcome?: string | null;
           source?: EventSource | null;
+          amount?: number | null;
+          billing?: EventBilling | null;
         };
         Relationships: [];
       };
