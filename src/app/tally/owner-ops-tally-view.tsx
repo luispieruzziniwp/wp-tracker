@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Undo2 } from "lucide-react";
 import { NavLinks } from "@/components/nav-links";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { EventBilling, EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import { TALLY_EVENTS, labelForEventType } from "@/lib/tally-events";
 import { SOURCES, SOURCE_COLOR, SOURCE_LABEL } from "@/lib/sources";
@@ -126,53 +127,33 @@ type OnTap = (
   paid?: { amount: number; billing: EventBilling } | null,
 ) => void;
 
-// Shared open/close/outside-click/Escape/1-5 behavior for a source-picker
-// popover anchored to a trigger button. Takes no callback up front — the
-// caller keeps onPickRef.current pointed at its latest handler each render,
-// which sidesteps ordering issues between this hook's setOpen and a
-// useCallback below it that also needs to call setOpen.
+// Open state plus 1-5 source shortcuts for a source-picker popover. Outside
+// click, Escape, and collision-aware positioning come from the Radix Popover.
+// The caller keeps onPickRef.current pointed at its latest handler each render.
 function useSourcePopover() {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
   const onPickRef = useRef<((source: EventSource) => void) | null>(null);
 
   useEffect(() => {
     if (!open) return;
 
-    function handlePointerDown(e: PointerEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        return;
-      }
       const num = Number(e.key);
       if (Number.isInteger(num) && num >= 1 && num <= SOURCES.length) {
         onPickRef.current?.(SOURCES[num - 1].key);
       }
     }
 
-    document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open]);
 
-  return { open, setOpen, containerRef, onPickRef };
+  return { open, setOpen, onPickRef };
 }
 
 function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
   return (
-    <div
-      role="menu"
-      aria-label="Choose lead source"
-      className="absolute left-1/2 top-full z-30 mt-2 flex -translate-x-1/2 gap-1 rounded-xl border border-border bg-card p-1.5 shadow-xl"
-    >
+    <PopoverContent role="menu" aria-label="Choose lead source" className="flex w-auto gap-1">
       {SOURCES.map((s) => (
         <button
           key={s.key}
@@ -185,7 +166,7 @@ function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
           {s.label}
         </button>
       ))}
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -235,16 +216,16 @@ export function OwnerOpsTallyView({
   return (
     <>
       {/* Desktop (>=1024px) */}
-      <div className="hidden h-dvh flex-col overflow-hidden bg-background lg:flex">
+      <div className="hidden min-h-dvh flex-col bg-background lg:flex">
         <DesktopTopBar todayLabel={todayLabel} role={role} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-10 py-7">
-          <div className="mb-5 flex shrink-0 items-center gap-4">
+        <main className="flex flex-1 flex-col px-10 py-7">
+          <div className="mb-5 flex h-10 shrink-0 items-center gap-4">
             <h1 className="font-serif text-[34px] leading-none">Tally</h1>
             <DateControl selectedDate={selectedDate} todayKey={todayKey} onChange={onSelectDate} />
+            {banner}
           </div>
           <div className="grid min-h-0 flex-1 gap-5" style={{ gridTemplateColumns: "2fr 1fr" }}>
             <div className="flex min-h-0 flex-col gap-5">
-              {banner}
               <MatrixCard counts={counts} pendingType={pendingType} onTap={onTap} size="desktop" />
               <OutcomesCard counts={counts} pendingType={pendingType} onTap={onTap} />
             </div>
@@ -274,7 +255,7 @@ export function OwnerOpsTallyView({
           {displayName && <p className="text-sm text-muted-foreground">Hey, {displayName}</p>}
         </div>
         <div className="flex flex-col gap-4 px-4 py-5">
-          {banner}
+          <div className="h-[60px]">{banner}</div>
           <WeekCard weekCounts={weekCounts} compact />
           <MatrixCard counts={counts} pendingType={pendingType} onTap={onTap} size="mobile" />
           <OutcomesCard counts={counts} pendingType={pendingType} onTap={onTap} />
@@ -429,7 +410,7 @@ function MatrixCell({
   const baseToast = TOAST_BY_TYPE[eventType] ?? `${labelForEventType(eventType)} ✓`;
   const needsSource = SOURCE_PROMPT_TYPES.has(eventType);
 
-  const { open, setOpen, containerRef, onPickRef } = useSourcePopover();
+  const { open, setOpen, onPickRef } = useSourcePopover();
 
   const handlePick = useCallback(
     (source: EventSource) => {
@@ -440,40 +421,36 @@ function MatrixCell({
   );
   onPickRef.current = handlePick;
 
-  function handleClick() {
-    if (needsSource) {
-      setOpen((o) => !o);
-    } else {
-      onTap(eventType, baseToast, null);
-    }
-  }
+  const button = (
+    <button
+      type="button"
+      onClick={needsSource ? undefined : () => onTap(eventType, baseToast, null)}
+      disabled={pending}
+      aria-label={`Log ${fullLabel}, ${count} today`}
+      className={`flex w-full items-center justify-center rounded-xl border font-bold tabular-nums transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+      style={{
+        height,
+        backgroundColor: style.bg,
+        borderColor: style.border,
+        color: style.text,
+        fontSize: 28,
+      }}
+    >
+      {pending ? (
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      ) : (
+        count
+      )}
+    </button>
+  );
+
+  if (!needsSource) return button;
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={pending}
-        aria-label={`Log ${fullLabel}, ${count} today`}
-        aria-haspopup={needsSource ? "menu" : undefined}
-        aria-expanded={needsSource ? open : undefined}
-        className={`flex w-full items-center justify-center rounded-xl border font-bold tabular-nums transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
-        style={{
-          height,
-          backgroundColor: style.bg,
-          borderColor: style.border,
-          color: style.text,
-          fontSize: 28,
-        }}
-      >
-        {pending ? (
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        ) : (
-          count
-        )}
-      </button>
-      {needsSource && open && <SourceMenu onPick={handlePick} />}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{button}</PopoverTrigger>
+      <SourceMenu onPick={handlePick} />
+    </Popover>
   );
 }
 
@@ -518,7 +495,7 @@ function OutcomeButton({
 }) {
   const baseToast = TOAST_BY_TYPE[type] ?? `${label} ✓`;
 
-  const { open, setOpen, containerRef, onPickRef } = useSourcePopover();
+  const { open, setOpen, onPickRef } = useSourcePopover();
 
   const handlePick = useCallback(
     (source: EventSource) => {
@@ -530,24 +507,23 @@ function OutcomeButton({
   onPickRef.current = handlePick;
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={pending}
-        aria-label={`Log ${label.toLowerCase()}, ${count} today`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
-        style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
-      >
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
-          {pending ? "…" : count}
-        </span>
-      </button>
-      {open && <SourceMenu onPick={handlePick} />}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={pending}
+          aria-label={`Log ${label.toLowerCase()}, ${count} today`}
+          className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+          style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
+        >
+          <span className="text-sm font-medium text-foreground">{label}</span>
+          <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
+            {pending ? "…" : count}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <SourceMenu onPick={handlePick} />
+    </Popover>
   );
 }
 
@@ -658,14 +634,14 @@ function PastDateBanner({ label, onBack }: { label: string; onBack: () => void }
   return (
     <div
       role="status"
-      className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3"
+      className="flex h-[60px] shrink-0 items-center justify-between gap-3 rounded-xl border px-3 lg:h-10 lg:whitespace-nowrap"
       style={{ backgroundColor: "#3A2A0B", borderColor: "#F2C46D", color: "#F2C46D" }}
     >
-      <span className="text-sm font-semibold">Logging for {label} — not today</span>
+      <span className="text-xs font-semibold leading-tight lg:text-sm">Logging for {label} — not today</span>
       <button
         type="button"
         onClick={onBack}
-        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white/10 active:scale-[0.97] ${FOCUS_RING}`}
+        className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white/10 active:scale-[0.97] ${FOCUS_RING}`}
         style={{ borderColor: "#F2C46D" }}
       >
         Back to today
@@ -720,7 +696,7 @@ function DateControl({
   );
 }
 
-// Paid asks for an amount (and billing cadence) before logging, so it can't
+// Paid asks for an amount (and billing cadence) before logging, so it cannot
 // share useSourcePopover — that hook binds the 1-5 keys to source picks,
 // which would fire while typing the amount.
 function PaidButton({
@@ -737,46 +713,17 @@ function PaidButton({
   const [amountText, setAmountText] = useState("");
   const [billing, setBilling] = useState<EventBilling>("monthly");
   const [error, setError] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   const baseToast = TOAST_BY_TYPE.paid ?? "Paid ✓";
 
-  const close = useCallback(() => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    amountRef.current?.focus();
-
-    function handlePointerDown(e: PointerEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+  function handleOpenChange(next: boolean) {
+    if (next) {
+      setSource(null);
+      setAmountText("");
+      setBilling("monthly");
+      setError(null);
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, close]);
-
-  function openPopover() {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setSource(null);
-    setAmountText("");
-    setBilling("monthly");
-    setError(null);
-    setOpen(true);
+    setOpen(next);
   }
 
   function submit(e: React.FormEvent) {
@@ -799,34 +746,35 @@ function PaidButton({
       source,
       { amount: rounded, billing },
     );
-    close();
+    setOpen(false);
   }
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={openPopover}
-        disabled={pending}
-        aria-label={`Log paid, ${count} today`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
-        style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
-      >
-        <span className="text-sm font-medium text-foreground">Paid</span>
-        <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
-          {pending ? "…" : count}
-        </span>
-      </button>
-      {open && (
-        <form
-          role="dialog"
-          aria-label="Log paid"
-          onSubmit={submit}
-          className="absolute right-0 top-full z-30 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-xl"
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={pending}
+          aria-label={`Log paid, ${count} today`}
+          className={`flex w-full items-center justify-between rounded-xl border px-4 transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 ${FOCUS_RING}`}
+          style={{ height: 64, backgroundColor: COLORS.outcomeBg, borderColor: COLORS.outcomeBorder }}
         >
+          <span className="text-sm font-medium text-foreground">Paid</span>
+          <span className="text-[26px] font-bold tabular-nums" style={{ color: "#4FD1A5" }}>
+            {pending ? "…" : count}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        aria-label="Log paid"
+        className="w-72 max-w-[calc(100vw-16px)] p-3"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          amountRef.current?.focus();
+        }}
+      >
+        <form onSubmit={submit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Source
@@ -912,7 +860,7 @@ function PaidButton({
             Log
           </button>
         </form>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
