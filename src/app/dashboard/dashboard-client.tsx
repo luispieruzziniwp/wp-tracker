@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -16,40 +16,37 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
-import type { EventBilling, EventSource, EventType, UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
+import type { EventSource, EventType, UserRole, WeeklyStatsRow } from "@/lib/supabase/database.types";
 import { CHART_AXIS, CHART_COLORS, CHART_GRID } from "@/lib/chart-colors";
 import { SOURCES } from "@/lib/sources";
+import { formatCurrency, formatRate } from "@/lib/weekly-stats";
 import {
-  RANGE_OPTIONS,
-  RangeOption,
-  formatCurrency,
-  formatRate,
-  formatWeekLabel,
-  mergeWeeklyData,
-  rangeStartDate,
-  safeRate,
-  sum,
-} from "@/lib/weekly-stats";
+  defaultPeriod,
+  granularityFor,
+  periodFromHash,
+  periodToHash,
+  previousRange,
+  rangeLabel,
+  resolvePeriod,
+  type Period,
+} from "@/lib/dashboard-period";
+import {
+  buildChartData,
+  computeTotals,
+  dateKeyOfEvent,
+  eventsInRange,
+  type DashEvent,
+} from "@/lib/dashboard-stats";
+import { localDateKey, parseDateKey, shiftDateKey } from "@/lib/tally-dates";
+import { PeriodSelector } from "./period-selector";
 
 const TOOLTIP_STYLE = {
   borderRadius: 8,
   border: `1px solid ${CHART_GRID}`,
   fontSize: 12,
-};
-
-// Extends the shape mergeWeeklyData() reads (type, occurred_at) with the new
-// source column, used only for the "By source" section below — the history
-// merge itself is untouched and never reads this extra field.
-type SourceEvent = {
-  type: EventType;
-  occurred_at: string;
-  source: EventSource | null;
-  amount: number | null;
-  billing: EventBilling | null;
 };
 
 const SOURCE_METRIC_TYPES = new Set<EventType>([
@@ -73,11 +70,32 @@ export default function DashboardClient() {
 
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
-  const [range, setRange] = useState<RangeOption>("month");
+  const [period, setPeriod] = useState<Period | null>(null);
   const [weeklyStatsRows, setWeeklyStatsRows] = useState<WeeklyStatsRow[]>([]);
-  const [eventRows, setEventRows] = useState<SourceEvent[]>([]);
+  const [eventRows, setEventRows] = useState<DashEvent[]>([]);
   const [fetching, setFetching] = useState(false);
   const [sourceTrackingStartedAt, setSourceTrackingStartedAt] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
+
+  // The selected period lives in the URL hash so a view can be bookmarked or
+  // shared. Read after mount (the hash isn't available during SSR).
+  useEffect(() => {
+    const apply = () => {
+      const next = periodFromHash(window.location.hash) ?? defaultPeriod();
+      setPeriod(next);
+      if (window.location.hash !== periodToHash(next)) {
+        window.history.replaceState(null, "", periodToHash(next));
+      }
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
+
+  function changePeriod(next: Period) {
+    setPeriod(next);
+    window.history.replaceState(null, "", periodToHash(next));
+  }
 
   const loadRole = useCallback(async () => {
     setLoading(true);
@@ -106,44 +124,62 @@ export default function DashboardClient() {
   }, [loadRole]);
 
   const loadStats = useCallback(async () => {
+    if (!period) return;
+    const seq = ++loadSeqRef.current;
     setFetching(true);
 
-    const start = rangeStartDate(range);
+    // Fetch the current period plus the previous one (for the change vs.
+    // previous period on each card).
+    const cur = resolvePeriod(period);
+    const prev = previousRange(period);
+    const fetchStart = prev?.start ?? cur.start;
+    const endExclusiveISO = parseDateKey(shiftDateKey(cur.end, 1)).toISOString();
 
     let weeklyStatsQuery = supabase
       .from("weekly_stats")
       .select("*")
+      .lte("week_start", cur.end)
       .order("week_start", { ascending: true });
-    if (start) {
-      weeklyStatsQuery = weeklyStatsQuery.gte("week_start", start);
+    if (fetchStart) weeklyStatsQuery = weeklyStatsQuery.gte("week_start", fetchStart);
+
+    // PostgREST caps a response at 1000 rows, so page through events.
+    const PAGE = 1000;
+    const events: DashEvent[] = [];
+    let eventsError: string | null = null;
+    for (let from = 0; ; from += PAGE) {
+      let q = supabase
+        .from("events")
+        .select("type, occurred_at, source, amount, billing")
+        .lt("occurred_at", endExclusiveISO)
+        .order("occurred_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (fetchStart) q = q.gte("occurred_at", parseDateKey(fetchStart).toISOString());
+      const { data, error } = await q;
+      if (error) {
+        eventsError = error.message;
+        break;
+      }
+      events.push(...(data ?? []));
+      if (!data || data.length < PAGE) break;
     }
 
-    let eventsQuery = supabase
-      .from("events")
-      .select("type, occurred_at, source, amount, billing")
-      .order("occurred_at", { ascending: true });
-    if (start) {
-      eventsQuery = eventsQuery.gte("occurred_at", start);
-    }
-
-    const [weeklyStatsResult, eventsResult] = await Promise.all([
-      weeklyStatsQuery,
-      eventsQuery,
-    ]);
+    const weeklyStatsResult = await weeklyStatsQuery;
+    if (seq !== loadSeqRef.current) return; // superseded by a newer selection
     setFetching(false);
 
     if (weeklyStatsResult.error) {
       toast.error(weeklyStatsResult.error.message);
       return;
     }
-    if (eventsResult.error) {
-      toast.error(eventsResult.error.message);
+    if (eventsError) {
+      toast.error(eventsError);
       return;
     }
 
     setWeeklyStatsRows(weeklyStatsResult.data ?? []);
-    setEventRows(eventsResult.data ?? []);
-  }, [range, supabase]);
+    setEventRows(events);
+  }, [period, supabase]);
 
   useEffect(() => {
     if (role === "owner" || role === "ops") {
@@ -151,7 +187,7 @@ export default function DashboardClient() {
     }
   }, [role, loadStats]);
 
-  // Independent of the range toggle — this is an absolute fact about the
+  // Independent of the period selection — this is an absolute fact about the
   // whole account's history, not something that should change as you filter.
   useEffect(() => {
     if (role !== "owner" && role !== "ops") return;
@@ -170,66 +206,45 @@ export default function DashboardClient() {
     router.replace("/login");
   }
 
-  const combined = useMemo(
-    () => mergeWeeklyData(weeklyStatsRows, eventRows, rangeStartDate(range)),
+  const range = useMemo(() => (period ? resolvePeriod(period) : null), [period]);
+  const prevRange = useMemo(() => (period ? previousRange(period) : null), [period]);
+  const curEvents = useMemo(
+    () => (range ? eventsInRange(eventRows, range) : []),
+    [eventRows, range],
+  );
+
+  const totals = useMemo(
+    () => (range ? computeTotals(weeklyStatsRows, eventRows, range) : null),
     [weeklyStatsRows, eventRows, range],
   );
-  const weeks = combined.weeks;
-
-  const totals = useMemo(() => {
-    const connectionRequestsSent = sum(weeks.map((w) => w.connection_requests_sent));
-    const connectionsAccepted = sum(weeks.map((w) => w.connections_accepted));
-    const leadsReplied = sum(weeks.map((w) => w.leads_replied));
-    const introCallsDone = sum(weeks.map((w) => w.intro_calls_done));
-    const podcastsDone = sum(weeks.map((w) => w.podcast_interviews_done));
-    const salesCallsDone = sum(weeks.map((w) => w.sales_calls_done));
-    const enrollments = sum(weeks.map((w) => w.enrollments));
-    const salesAmount = sum(weeks.map((w) => w.sales_amount));
-
-    let eventSales = 0;
-    let newMrr = 0;
-    let oneTime = 0;
-    for (const row of eventRows) {
-      if (row.type !== "paid" || !row.amount) continue;
-      const amount = Number(row.amount);
-      eventSales += amount;
-      if (row.billing === "monthly") newMrr += amount;
-      else if (row.billing === "one_time") oneTime += amount;
-    }
-
-    return {
-      connectionRequestsSent,
-      connectionsAccepted,
-      leadsReplied,
-      introCallsDone,
-      podcastsDone,
-      salesCallsDone,
-      enrollments,
-      salesAmount: salesAmount + eventSales,
-      newMrr,
-      oneTime,
-      acceptanceRate: safeRate(connectionsAccepted, connectionRequestsSent),
-      replyRate: safeRate(leadsReplied, connectionsAccepted),
-      enrollmentRate: safeRate(enrollments, salesCallsDone),
-    };
-  }, [weeks, eventRows]);
-
-  const chartData = useMemo(
-    () =>
-      weeks.map((w) => ({
-        week: formatWeekLabel(w.week_start),
-        connection_requests_sent: w.connection_requests_sent,
-        connections_accepted: w.connections_accepted,
-        leads_replied: w.leads_replied,
-        sales_calls_scheduled: w.sales_calls_scheduled,
-        sales_calls_done: w.sales_calls_done,
-        podcast_calls_scheduled: w.podcast_calls_scheduled,
-        podcast_interviews_done: w.podcast_interviews_done,
-        enrollments: w.enrollments,
-        sales_amount: w.sales_amount,
-      })),
-    [weeks],
+  const prevTotals = useMemo(
+    () => (prevRange ? computeTotals(weeklyStatsRows, eventRows, prevRange) : null),
+    [weeklyStatsRows, eventRows, prevRange],
   );
+
+  const chartData = useMemo(() => {
+    if (!period || !range) return [];
+    let start = range.start;
+    if (start === null) {
+      // All Time starts at the earliest data we have.
+      const firstRow = weeklyStatsRows[0]?.week_start;
+      const firstEvent = eventRows[0] ? dateKeyOfEvent(eventRows[0]) : undefined;
+      start = [firstRow, firstEvent].filter((v): v is string => !!v).sort()[0] ?? localDateKey();
+    }
+    return buildChartData(weeklyStatsRows, eventRows, range, start, granularityFor(period));
+  }, [period, range, weeklyStatsRows, eventRows]);
+
+  const hasData = useMemo(() => {
+    if (!range) return false;
+    return (
+      eventsInRange(eventRows, range).length > 0 ||
+      weeklyStatsRows.some(
+        (r) => (range.start === null || r.week_start >= range.start) && r.week_start <= range.end,
+      )
+    );
+  }, [range, eventRows, weeklyStatsRows]);
+
+  const isDaily = period ? granularityFor(period) === "day" : false;
 
   const bySource = useMemo(() => {
     const zero = () => Object.fromEntries(SOURCES.map((s) => [s.key, 0])) as Record<EventSource, number>;
@@ -238,7 +253,7 @@ export default function DashboardClient() {
     const verbalAgreements = zero();
     const paid = zero();
 
-    for (const row of eventRows) {
+    for (const row of curEvents) {
       if (!row.source || !SOURCE_METRIC_TYPES.has(row.type)) continue;
       if (row.type === "intro_call_done") introCallsDone[row.source] += 1;
       else if (row.type === "sales_call_done") salesCallsDone[row.source] += 1;
@@ -268,23 +283,20 @@ export default function DashboardClient() {
     });
 
     return { chartData, rows };
-  }, [eventRows]);
+  }, [curEvents]);
 
   const setterFunnel = useMemo(() => {
-    const totals = { dial: 0, dial_answered: 0, appointment_booked: 0, appointment_converted: 0 };
-    for (const counts of Object.values(combined.extraSeries)) {
-      totals.dial += counts.dial ?? 0;
-      totals.dial_answered += counts.dial_answered ?? 0;
-      totals.appointment_booked += counts.appointment_booked ?? 0;
-      totals.appointment_converted += counts.appointment_converted ?? 0;
+    const counts = { dial: 0, dial_answered: 0, appointment_booked: 0, appointment_converted: 0 };
+    for (const e of curEvents) {
+      if (e.type in counts) counts[e.type as keyof typeof counts] += 1;
     }
     return [
-      { stage: "Dial", value: totals.dial },
-      { stage: "Answered", value: totals.dial_answered },
-      { stage: "Booked", value: totals.appointment_booked },
-      { stage: "Converted", value: totals.appointment_converted },
+      { stage: "Dial", value: counts.dial },
+      { stage: "Answered", value: counts.dial_answered },
+      { stage: "Booked", value: counts.appointment_booked },
+      { stage: "Converted", value: counts.appointment_converted },
     ];
-  }, [combined.extraSeries]);
+  }, [curEvents]);
 
   if (loading) {
     return (
@@ -311,53 +323,58 @@ export default function DashboardClient() {
       <div className="flex flex-col gap-6">
       <h1 className="font-serif text-2xl tracking-tight">Dashboard</h1>
 
-      <div className="flex flex-wrap gap-2">
-        {RANGE_OPTIONS.map((option) => (
-          <Button
-            key={option.value}
-            size="sm"
-            variant={range === option.value ? "default" : "outline"}
-            onClick={() => setRange(option.value)}
-            disabled={fetching}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
+      {period && (
+        <div className="flex flex-col gap-1.5">
+          <PeriodSelector period={period} onChange={changePeriod} />
+          {prevRange && (
+            <p className="text-xs text-muted-foreground">
+              Changes compare with {rangeLabel(prevRange)}
+            </p>
+          )}
+        </div>
+      )}
 
-      {weeks.length === 0 ? (
+      {!period || !totals ? null : !hasData ? (
         <p className="text-sm text-muted-foreground">
-          {fetching ? "Loading stats..." : "No weekly stats in this range."}
+          {fetching ? "Loading stats..." : "No stats in this period."}
         </p>
       ) : (
         <>
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Requests Sent" value={totals.connectionRequestsSent} />
-            <StatCard label="Connections Accepted" value={totals.connectionsAccepted} />
-            <StatCard label="Leads Replied" value={totals.leadsReplied} />
-            <StatCard label="Intro Calls Done" value={totals.introCallsDone} />
-            <StatCard label="Podcasts Done" value={totals.podcastsDone} />
-            <StatCard label="Sales Calls Done" value={totals.salesCallsDone} />
-            <StatCard label="Enrollments" value={totals.enrollments} />
+            <StatCard label="Requests Sent" value={totals.connectionRequestsSent} cur={totals.connectionRequestsSent} prev={prevTotals?.connectionRequestsSent} />
+            <StatCard label="Connections Accepted" value={totals.connectionsAccepted} cur={totals.connectionsAccepted} prev={prevTotals?.connectionsAccepted} />
+            <StatCard label="Leads Replied" value={totals.leadsReplied} cur={totals.leadsReplied} prev={prevTotals?.leadsReplied} />
+            <StatCard label="Intro Calls Done" value={totals.introCallsDone} cur={totals.introCallsDone} prev={prevTotals?.introCallsDone} />
+            <StatCard label="Podcasts Done" value={totals.podcastsDone} cur={totals.podcastsDone} prev={prevTotals?.podcastsDone} />
+            <StatCard label="Sales Calls Done" value={totals.salesCallsDone} cur={totals.salesCallsDone} prev={prevTotals?.salesCallsDone} />
+            <StatCard label="Enrollments" value={totals.enrollments} cur={totals.enrollments} prev={prevTotals?.enrollments} />
             <StatCard
               label="Total Sales"
               value={formatCurrency(totals.salesAmount)}
+              cur={totals.salesAmount}
+              prev={prevTotals?.salesAmount}
               sub={`New MRR ${formatCurrency(totals.newMrr)} · One-time ${formatCurrency(totals.oneTime)}`}
             />
           </section>
 
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <RateCard label="Acceptance Rate" rate={totals.acceptanceRate} />
-            <RateCard label="Reply Rate" rate={totals.replyRate} />
-            <RateCard label="Enrollment Rate" rate={totals.enrollmentRate} />
+            <RateCard label="Acceptance Rate" rate={totals.acceptanceRate} prev={prevTotals ? prevTotals.acceptanceRate : undefined} />
+            <RateCard label="Reply Rate" rate={totals.replyRate} prev={prevTotals ? prevTotals.replyRate : undefined} />
+            <RateCard label="Enrollment Rate" rate={totals.enrollmentRate} prev={prevTotals ? prevTotals.enrollmentRate : undefined} />
           </section>
+
+          {isDaily && (
+            <p className="text-xs text-muted-foreground">
+              Daily charts show live-tapped events only; historical weekly totals can&apos;t be split by day.
+            </p>
+          )}
 
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Outreach Funnel">
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={CHART_GRID} vertical={false} />
-                  <XAxis dataKey="week" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -372,7 +389,7 @@ export default function DashboardClient() {
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={CHART_GRID} vertical={false} />
-                  <XAxis dataKey="week" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -386,7 +403,7 @@ export default function DashboardClient() {
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={CHART_GRID} vertical={false} />
-                  <XAxis dataKey="week" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
                   <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={false} width={36} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -400,7 +417,7 @@ export default function DashboardClient() {
               <ResponsiveContainer width="100%" height={260}>
                 <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={CHART_GRID} vertical={false} />
-                  <XAxis dataKey="week" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
                   <YAxis
                     yAxisId="left"
                     tick={{ fontSize: 12, fill: CHART_COLORS.blue }}
@@ -522,10 +539,14 @@ export default function DashboardClient() {
 function StatCard({
   label,
   value,
+  cur,
+  prev,
   sub,
 }: {
   label: string;
   value: number | string;
+  cur: number;
+  prev?: number | null;
   sub?: string;
 }) {
   return (
@@ -533,20 +554,80 @@ function StatCard({
       <CardContent className="flex flex-col gap-1 p-4">
         <span className="text-xs text-muted-foreground">{label}</span>
         <span className="text-2xl font-bold tabular-nums">{value}</span>
+        {prev !== undefined && prev !== null && <Delta change={percentChange(cur, prev)} />}
         {sub && <span className="text-[11px] text-muted-foreground">{sub}</span>}
       </CardContent>
     </Card>
   );
 }
 
-function RateCard({ label, rate }: { label: string; rate: number | null }) {
+function RateCard({
+  label,
+  rate,
+  prev,
+}: {
+  label: string;
+  rate: number | null;
+  prev?: number | null;
+}) {
+  // prev is undefined when there is no comparison (All Time); null when the
+  // previous period had no denominator.
+  const change =
+    prev === undefined
+      ? undefined
+      : rate === null || prev === null
+        ? ({ kind: "none" } as const)
+        : pointChange(rate, prev);
   return (
     <Card>
-      <CardContent className="flex items-center justify-between p-4">
+      <CardContent className="flex items-center justify-between gap-3 p-4">
         <span className="text-sm text-muted-foreground">{label}</span>
-        <span className="text-lg font-semibold tabular-nums">{formatRate(rate)}</span>
+        <span className="flex flex-col items-end gap-0.5">
+          <span className="text-lg font-semibold tabular-nums">{formatRate(rate)}</span>
+          {change && <Delta change={change} />}
+        </span>
       </CardContent>
     </Card>
+  );
+}
+
+type Change =
+  | { kind: "none" }
+  | { kind: "flat" }
+  | { kind: "new" }
+  | { kind: "up" | "down"; text: string };
+
+function percentChange(cur: number, prev: number): Change {
+  if (prev === 0) return cur === 0 ? { kind: "none" } : { kind: "new" };
+  const pct = ((cur - prev) / Math.abs(prev)) * 100;
+  if (Math.abs(pct) < 0.05) return { kind: "flat" };
+  const abs = Math.abs(pct);
+  return { kind: pct > 0 ? "up" : "down", text: `${abs < 10 ? abs.toFixed(1) : Math.round(abs)}%` };
+}
+
+function pointChange(cur: number, prev: number): Change {
+  const pts = (cur - prev) * 100;
+  if (Math.abs(pts) < 0.05) return { kind: "flat" };
+  return { kind: pts > 0 ? "up" : "down", text: `${Math.abs(pts).toFixed(1)} pts` };
+}
+
+// Every dashboard metric is "higher is better": up is green, down is red.
+function Delta({ change }: { change: Change }) {
+  if (change.kind === "none") {
+    return <span className="text-[11px] text-muted-foreground">— vs prev</span>;
+  }
+  if (change.kind === "flat") {
+    return <span className="text-[11px] text-muted-foreground">0% vs prev</span>;
+  }
+  if (change.kind === "new") {
+    return <span className="text-[11px] font-medium text-positive">▲ new vs prev</span>;
+  }
+  return (
+    <span
+      className={`text-[11px] font-medium ${change.kind === "up" ? "text-positive" : "text-negative"}`}
+    >
+      {change.kind === "up" ? "▲" : "▼"} {change.text} vs prev
+    </span>
   );
 }
 
