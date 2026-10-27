@@ -19,24 +19,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppShell } from "@/components/app-shell";
 import { homeForRole } from "@/components/nav-links";
 import { OwnerOpsTallyView } from "./owner-ops-tally-view";
+import { EventLogCard, firstName, type LogEvent } from "./event-log";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { EventBilling, EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import {
   SETTER_EVENTS,
   type EventTone,
+  labelForEventType,
   startOfWeekISO,
 } from "@/lib/tally-events";
 import { dayBoundsISO, localDateKey, noonISO } from "@/lib/tally-dates";
-
-type TodayEvent = {
-  id: string;
-  type: EventType;
-  occurred_at: string;
-  source: EventSource | null;
-  amount: number | null;
-  billing: EventBilling | null;
-};
 
 export type PaidExtra = { amount: number; billing: EventBilling };
 
@@ -92,13 +85,14 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
 
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [counts, setCounts] = useState<Counts>(EMPTY_COUNTS);
   const [weekCounts, setWeekCounts] = useState<Counts>(EMPTY_COUNTS);
   const [pendingType, setPendingType] = useState<EventType | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [lastEventId, setLastEventId] = useState<string | null>(null);
-  const [todayEvents, setTodayEvents] = useState<TodayEvent[]>([]);
+  const [todayEvents, setTodayEvents] = useState<LogEvent[]>([]);
   const [pillMessage, setPillMessage] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(() => localDateKey());
   const loadSeqRef = useRef(0);
@@ -135,42 +129,63 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
     }
     setRole(nextRole);
     setDisplayName(profile?.display_name ?? null);
+    setUserId(user.id);
 
     if (profile?.role === "owner" || profile?.role === "ops" || profile?.role === "setter") {
       const weekStart = startOfWeekISO();
       const { start: dayStart, end: dayEnd } = dayBoundsISO(selectedDate);
-      const { data: events } = await supabase
+      const canSeeAll = nextRole === "owner" || nextRole === "ops";
+      let eventsQuery = supabase
         .from("events")
-        .select("id, type, occurred_at, source, amount, billing")
-        .eq("user_id", user.id)
+        .select("id, user_id, type, occurred_at, source, amount, billing")
         .gte("occurred_at", dayStart < weekStart ? dayStart : weekStart)
         .order("occurred_at", { ascending: false });
+      if (!canSeeAll) eventsQuery = eventsQuery.eq("user_id", user.id);
+      const { data: events } = await eventsQuery;
+
+      // Who logged each entry (first name). Own entries use the profile we
+      // already have; others come from profiles when readable.
+      const nameById = new Map<string, string | null>([[user.id, firstName(profile?.display_name)]]);
+      const otherIds = Array.from(
+        new Set((events ?? []).map((row) => row.user_id).filter((id) => id !== user.id)),
+      );
+      if (otherIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", otherIds);
+        for (const pr of profiles ?? []) nameById.set(pr.id, firstName(pr.display_name));
+      }
 
       // A newer date selection superseded this load; drop the stale result.
       if (seq !== loadSeqRef.current) return;
 
       const nextToday = { ...EMPTY_COUNTS };
       const nextWeek = { ...EMPTY_COUNTS };
-      const nextTodayEvents: TodayEvent[] = [];
+      const nextTodayEvents: LogEvent[] = [];
       for (const row of events ?? []) {
         if (!(row.type in nextWeek)) continue;
-        if (row.occurred_at >= weekStart) nextWeek[row.type as EventType] += 1;
+        // Counts (matrix, This week) stay your own taps; the log shows everyone's.
+        const own = row.user_id === user.id;
+        if (own && row.occurred_at >= weekStart) nextWeek[row.type as EventType] += 1;
         if (row.occurred_at >= dayStart && row.occurred_at < dayEnd) {
-          nextToday[row.type as EventType] += 1;
+          if (own) nextToday[row.type as EventType] += 1;
           nextTodayEvents.push({
             id: row.id,
+            user_id: row.user_id,
             type: row.type as EventType,
             occurred_at: row.occurred_at,
             source: row.source,
             amount: row.amount === null ? null : Number(row.amount),
             billing: row.billing,
+            logged_by: nameById.get(row.user_id) ?? null,
           });
         }
       }
       setCounts(nextToday);
       setWeekCounts(nextWeek);
       setTodayEvents(nextTodayEvents);
-      setLastEventId(nextTodayEvents.length > 0 ? nextTodayEvents[0].id : null);
+      setLastEventId(nextTodayEvents.find((ev) => ev.user_id === user.id)?.id ?? null);
     }
 
     setLoading(false);
@@ -243,11 +258,13 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
         [
           {
             id: data.id,
+            user_id: user.id,
             type,
             occurred_at: occurredAt,
             source,
             amount: paid?.amount ?? null,
             billing: paid?.billing ?? null,
+            logged_by: firstName(displayName),
           },
           ...list,
         ].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
@@ -312,9 +329,42 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
     }
     const remaining = todayEvents.filter((e) => e.id !== last.id);
     setTodayEvents(remaining);
-    setLastEventId(remaining.length > 0 ? remaining[0].id : null);
+    setLastEventId(remaining.find((ev) => ev.user_id === user.id)?.id ?? null);
 
     showToast("Undid last entry");
+  }
+
+  // Resolves true only after the row is really gone from the database. RLS
+  // can turn a delete into a silent no-op, so an empty result counts as failure.
+  async function handleDeleteEvent(id: string): Promise<boolean> {
+    const target = todayEvents.find((ev) => ev.id === id);
+    if (!target) return false;
+
+    const { data, error } = await supabase.from("events").delete().eq("id", id).select("id");
+
+    if (error) {
+      toast.error(error.message);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      toast.error("Couldn't delete this entry. You may not have permission.");
+      return false;
+    }
+
+    const own = target.user_id === userId;
+    if (own && target.type in EMPTY_COUNTS) {
+      const type = target.type;
+      setCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
+      if (target.occurred_at >= startOfWeekISO()) {
+        setWeekCounts((c) => ({ ...c, [type]: Math.max(0, c[type] - 1) }));
+      }
+    }
+    const remaining = todayEvents.filter((ev) => ev.id !== id);
+    setTodayEvents(remaining);
+    setLastEventId(remaining.find((ev) => ev.user_id === userId)?.id ?? null);
+
+    showToast(`Deleted ${labelForEventType(target.type).toLowerCase()}`);
+    return true;
   }
 
   async function handleSignOut() {
@@ -374,6 +424,14 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
             </CardContent>
           </Card>
 
+          <EventLogCard
+            events={todayEvents}
+            isPast={false}
+            dateLabel=""
+            onDelete={handleDeleteEvent}
+            className="h-80"
+          />
+
           <div className="sticky bottom-20 z-10 md:bottom-4">
             <button
               type="button"
@@ -399,6 +457,7 @@ export default function TallyClient({ view }: { view: "tally" | "setter" }) {
       counts={counts}
       weekCounts={weekCounts}
       todayEvents={todayEvents}
+      onDeleteEvent={handleDeleteEvent}
       pendingType={pendingType}
       undoing={undoing}
       lastEventId={lastEventId}

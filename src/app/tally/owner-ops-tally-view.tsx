@@ -6,7 +6,8 @@ import { NavLinks } from "@/components/nav-links";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { EventBilling, EventSource, EventType, UserRole } from "@/lib/supabase/database.types";
 import { TALLY_EVENTS, labelForEventType } from "@/lib/tally-events";
-import { SOURCES, SOURCE_COLOR, SOURCE_LABEL } from "@/lib/sources";
+import { SOURCES, SOURCE_LABEL } from "@/lib/sources";
+import { EventLogCard, type LogEvent } from "./event-log";
 import {
   formatDateKeyLong,
   formatPaidAmount,
@@ -15,15 +16,6 @@ import {
 } from "@/lib/tally-dates";
 
 type Counts = Record<EventType, number>;
-type TodayEvent = {
-  id: string;
-  type: EventType;
-  occurred_at: string;
-  source: EventSource | null;
-  amount: number | null;
-  billing: EventBilling | null;
-};
-
 // These are the only types that prompt for a lead source before logging.
 // Everything else (canceled, rescheduled, podcast_*) keeps logging on a
 // single click with source: null.
@@ -109,17 +101,6 @@ const TOAST_BY_TYPE: Partial<Record<EventType, string>> = Object.fromEntries(
 const FOCUS_RING =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
-function dotColor(type: EventType): string {
-  if (type.endsWith("canceled") || type.endsWith("rescheduled")) return "#F07A7A";
-  if (type === "verbal_agreement" || type === "paid" || type === "appointment_converted") return "#4FD1A5";
-  if (type.endsWith("done") || type === "dial_answered" || type === "appointment_booked") return "#3FB8C9";
-  return "#9CC7D4";
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 type OnTap = (
   type: EventType,
   toastText: string,
@@ -178,6 +159,7 @@ export function OwnerOpsTallyView({
   counts,
   weekCounts,
   todayEvents,
+  onDeleteEvent,
   pendingType,
   undoing,
   lastEventId,
@@ -192,7 +174,8 @@ export function OwnerOpsTallyView({
   onSelectDate: (key: string) => void;
   counts: Counts;
   weekCounts: Counts;
-  todayEvents: TodayEvent[];
+  todayEvents: LogEvent[];
+  onDeleteEvent: (id: string) => Promise<boolean>;
   pendingType: EventType | null;
   undoing: boolean;
   lastEventId: string | null;
@@ -205,7 +188,6 @@ export function OwnerOpsTallyView({
     () => new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
     [],
   );
-  const visibleLog = todayEvents.slice(0, 6);
   const todayKey = localDateKey();
   const isPast = selectedDate !== todayKey;
   const dateLabel = formatDateKeyLong(selectedDate);
@@ -231,13 +213,12 @@ export function OwnerOpsTallyView({
             </div>
             <div className="flex min-h-0 flex-col gap-5">
               <WeekCard weekCounts={weekCounts} />
-              <TodayLogCard
-                events={visibleLog}
+              <EventLogCard
+                events={todayEvents}
                 isPast={isPast}
                 dateLabel={dateLabel}
-                undoing={undoing}
-                lastEventId={lastEventId}
-                onUndo={onUndo}
+                onDelete={onDeleteEvent}
+                undo={{ undoing, disabled: !lastEventId, onUndo }}
                 className="min-h-0 flex-1"
               />
             </div>
@@ -259,6 +240,13 @@ export function OwnerOpsTallyView({
           <WeekCard weekCounts={weekCounts} compact />
           <MatrixCard counts={counts} pendingType={pendingType} onTap={onTap} size="mobile" />
           <OutcomesCard counts={counts} pendingType={pendingType} onTap={onTap} />
+          <EventLogCard
+            events={todayEvents}
+            isPast={isPast}
+            dateLabel={dateLabel}
+            onDelete={onDeleteEvent}
+            className="h-80"
+          />
           <button
             type="button"
             onClick={onUndo}
@@ -547,84 +535,6 @@ function WeekCard({ weekCounts, compact }: { weekCounts: Counts; compact?: boole
             </span>
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function TodayLogCard({
-  events,
-  isPast,
-  dateLabel,
-  undoing,
-  lastEventId,
-  onUndo,
-  className = "",
-}: {
-  events: TodayEvent[];
-  isPast: boolean;
-  dateLabel: string;
-  undoing: boolean;
-  lastEventId: string | null;
-  onUndo: () => void;
-  className?: string;
-}) {
-  return (
-    <div className={`flex flex-col rounded-2xl border border-border bg-card p-5 ${className}`}>
-      <div className="mb-3 flex shrink-0 items-center justify-between">
-        <h2 className="font-serif text-lg leading-none">
-          {isPast ? `Log for ${dateLabel}` : "Today\u2019s log"}
-        </h2>
-        <button
-          type="button"
-          onClick={onUndo}
-          disabled={undoing || !lastEventId}
-          className={`flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent active:scale-[0.97] disabled:opacity-50 ${FOCUS_RING}`}
-        >
-          <Undo2 className="h-3.5 w-3.5" />
-          {undoing ? "Undoing…" : "Undo last"}
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {events.length === 0 ? (
-          <p className="text-sm" style={{ color: "#9CC7D4" }}>
-            {isPast ? "Nothing logged on this date." : "Nothing logged yet today."}
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2.5">
-            {events.map((evt) => (
-              <li key={evt.id} className="flex items-center gap-2.5 text-sm">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: dotColor(evt.type) }}
-                  aria-hidden
-                />
-                <span className="flex-1 truncate">
-                  {labelForEventType(evt.type)}
-                  {evt.type === "paid" && evt.amount != null && evt.billing && (
-                    <span className="ml-1.5 font-semibold" style={{ color: "#4FD1A5" }}>
-                      {formatPaidAmount(evt.amount, evt.billing)}
-                    </span>
-                  )}
-                </span>
-                {evt.source && (
-                  <span
-                    className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                    style={{
-                      backgroundColor: `${SOURCE_COLOR[evt.source]}26`,
-                      color: SOURCE_COLOR[evt.source],
-                    }}
-                  >
-                    {SOURCE_LABEL[evt.source]}
-                  </span>
-                )}
-                <span className="shrink-0 text-xs tabular-nums" style={{ color: "#9CC7D4" }}>
-                  {formatTime(evt.occurred_at)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   );
