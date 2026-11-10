@@ -108,7 +108,7 @@ type OnTap = (
   paid?: { amount: number; billing: EventBilling } | null,
 ) => void;
 
-// Open state plus 1-5 source shortcuts for a source-picker popover. Outside
+// Open state plus 1-6 source shortcuts for a source-picker popover. Outside
 // click, Escape, and collision-aware positioning come from the Radix Popover.
 // The caller keeps onPickRef.current pointed at its latest handler each render.
 function useSourcePopover() {
@@ -134,7 +134,7 @@ function useSourcePopover() {
 
 function SourceMenu({ onPick }: { onPick: (source: EventSource) => void }) {
   return (
-    <PopoverContent role="menu" aria-label="Choose lead source" className="flex w-auto gap-1">
+    <PopoverContent role="menu" aria-label="Choose lead source" className="grid w-auto max-w-[calc(100vw-16px)] grid-cols-2 gap-1">
       {SOURCES.map((s) => (
         <button
           key={s.key}

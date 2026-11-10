@@ -27,7 +27,8 @@ export type EventSource =
   | "networking"
   | "referral"
   | "inbound"
-  | "outbound";
+  | "outbound"
+  | "accelerator";
 
 export type EventBilling = "one_time" | "monthly";
 

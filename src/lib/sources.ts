@@ -9,6 +9,7 @@ export const SOURCES: { key: EventSource; label: string; color: string }[] = [
   { key: "referral", label: "Referral", color: "#4FD1A5" },
   { key: "inbound", label: "Inbound", color: "#9CC7D4" },
   { key: "outbound", label: "Outbound", color: "#1E8AB5" },
+  { key: "accelerator", label: "Accelerator/Incubator", color: "#C9A0F2" },
 ];
 
 export const SOURCE_COLOR: Record<EventSource, string> = Object.fromEntries(
